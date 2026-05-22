@@ -1,0 +1,14 @@
+# Secrets (SPEC §10.3) — never commit
+.env
+.env.*
+!.env.example
+supabase/.env
+supabase/.temp/
+*.pem
+*.key
+
+# Local MCP config may hold a Supabase access token — commit .mcp.json.example only
+.mcp.json
+
+# OS / editor
+.DS_Store
