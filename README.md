@@ -17,17 +17,19 @@ Telegram bot on top of Supabase. Total running cost is ~$5–7/month.
 
 ## What it does
 
-- **Friday 6pm**, Sous messages your chat and proposes **5 dinners (Mon–Fri)** as
-  recipe cards — full instructions, a toddler version, and a baby-safe note.
+- **First run:** Sous asks a few quick setup questions — how many people +
+  kids' ages, dinners per week, monthly grocery budget, and the cuisines you
+  like — and plans around your answers.
+- It proposes your week as **recipe cards** — full instructions, a kid version,
+  and (if you have a baby) a soft/unsalted, no-honey note.
 - **Tap 🔄 Swap** on any card, or just text *"swap wednesday"* — it picks a
   replacement that keeps the week valid (no repeated cuisines back-to-back,
   weeknights ≤45 min).
-- **Tap ✅ Lock** or text *"lock it"** — it finalizes a **shopping list** split
+- **Tap ✅ Lock** or text *"lock it"* — it finalizes a **shopping list** split
   into 🧺 Farmers Market / 🏬 Grocery (eggs skipped — you have chickens).
 - **Rate dishes by chatting** — *"the carnitas were a 5"* — and future plans
-  favor what your family actually liked.
-- Cooks for the whole table: two adults, a toddler, and a baby (soft, unsalted,
-  no-honey portions baked into every card).
+  favor what your household actually liked.
+- **Friday 6pm** (optional cron), Sous proactively proposes the next week.
 
 ## How it works
 
@@ -83,7 +85,8 @@ send the bot one message.
 ### 3. By hand
 Follow [`SETUP.md`](./SETUP.md) step by step. Same steps the script runs.
 
-When you're done, message your bot **"plan the week"** and you're off.
+When you're done, message your bot **"hi"** — it'll walk you through a quick
+setup (family, meals/week, budget, cuisines), then say **"plan my week."**
 
 ## Project layout
 

@@ -131,8 +131,10 @@ curl "https://api.telegram.org/bot<BOT_TOKEN>/setWebhook" \
 ## Verify
 
 Message your bot:
-- **"plan the week"** → it should propose 5 dinners with Swap/Lock buttons + a
-  shopping list.
+- **"hi"** → first run kicks off **onboarding**: it asks how many people +
+  kids' ages, dinners per week, monthly budget, and cuisines, then saves them.
+- **"plan my week"** → proposes that many dinners with Swap/Lock buttons + a
+  shopping list, tuned to your answers.
 - **"the carnitas were a 5"** → it logs a rating and reacts.
 - Tap **🔄 Swap** / **✅ Lock** on the cards.
 

@@ -84,6 +84,12 @@ interface ShoppingRow {
   source: string;
 }
 
+interface WeekItem {
+  recipe_id: string;
+  day: string;
+  recipes: { title: string; cuisine_tag: string } | null;
+}
+
 interface PlanItemInput {
   day: DayKey;
   recipe_id: string;
@@ -311,11 +317,20 @@ export async function swapMeal(
     .maybeSingle();
 
   // The current week (titles + cuisines) and the candidate pool minus this week.
-  const { data: weekItems } = await db
+  const { data: weekRaw } = await db
     .from("meal_plan_items")
     .select("recipe_id, day, recipes(title, cuisine_tag)")
     .eq("plan_id", item.plan_id);
-  const inPlan = new Set((weekItems ?? []).map((w: { recipe_id: string }) => w.recipe_id));
+  // Normalize the embedded relation (supabase-js types it as an array).
+  const week: WeekItem[] = (weekRaw ?? []).map((w: Record<string, unknown>) => {
+    const r = Array.isArray(w.recipes) ? w.recipes[0] : w.recipes;
+    return {
+      recipe_id: w.recipe_id as string,
+      day: w.day as string,
+      recipes: r ? { title: String(r.title), cuisine_tag: String(r.cuisine_tag) } : null,
+    };
+  });
+  const inPlan = new Set(week.map((w) => w.recipe_id));
 
   const { data: candData } = await db.rpc("candidate_recipes", {
     p_window_days: 28,
@@ -336,10 +351,8 @@ export async function swapMeal(
   // Hard-enforce the §8 rules the model treats as soft: no cuisine on
   // consecutive days, and Mon–Thu stay ≤45 min. Fall back to the full pool
   // only if filtering leaves nothing.
-  const sorted = [...(weekItems ?? [])].sort((a, b) => (a.day < b.day ? -1 : 1));
-  const idx = sorted.findIndex(
-    (w: { recipe_id: string }) => w.recipe_id === item.recipe_id,
-  );
+  const sorted = [...week].sort((a, b) => (a.day < b.day ? -1 : 1));
+  const idx = sorted.findIndex((w) => w.recipe_id === item.recipe_id);
   const neighborCuisines = new Set<string>();
   if (idx > 0) neighborCuisines.add(sorted[idx - 1].recipes?.cuisine_tag ?? "");
   if (idx >= 0 && idx < sorted.length - 1) {
@@ -353,7 +366,7 @@ export async function swapMeal(
   const { toolUses } = await completeRaw({
     apiKey: Deno.env.get("ANTHROPIC_API_KEY")!,
     model: PLANNER_MODEL,
-    system: swapSystem(pool, weekItems ?? [], dayKey),
+    system: swapSystem(pool, week, dayKey),
     messages: [{
       role: "user",
       content:
@@ -487,7 +500,7 @@ export async function lockPlan(
 
 function swapSystem(
   pool: Candidate[],
-  weekItems: { recipe_id: string; day: string; recipes: { title: string; cuisine_tag: string } | null }[],
+  weekItems: WeekItem[],
   dayKey: DayKey,
 ): string {
   const week = weekItems
