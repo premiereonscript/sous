@@ -1,0 +1,126 @@
+// Household preferences — loaded once per request and turned into the dynamic
+// context the persona + planner reason against (replaces hardcoded constraints).
+
+import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
+
+export interface Kid {
+  age_months: number;
+}
+export interface Preferences {
+  adults: number;
+  kids: Kid[];
+  meals_per_week: number;
+  monthly_budget_usd: number | null;
+  cuisines: string[];
+  onboarded: boolean;
+}
+
+export const DEFAULT_PREFS: Preferences = {
+  adults: 2,
+  kids: [],
+  meals_per_week: 5,
+  monthly_budget_usd: null,
+  cuisines: [],
+  onboarded: false,
+};
+
+export async function getPreferences(
+  db: SupabaseClient,
+  householdId: string,
+): Promise<Preferences> {
+  const { data } = await db
+    .from("household_preferences")
+    .select("*")
+    .eq("household_id", householdId)
+    .maybeSingle();
+  if (!data) return { ...DEFAULT_PREFS };
+  return {
+    adults: data.adults ?? 2,
+    kids: (data.kids ?? []) as Kid[],
+    meals_per_week: data.meals_per_week ?? 5,
+    monthly_budget_usd: data.monthly_budget_usd ?? null,
+    cuisines: (data.cuisines ?? []) as string[],
+    onboarded: !!data.onboarded,
+  };
+}
+
+export interface HouseholdDescription {
+  serving: string; // e.g. "serves 2 adults + 2 kids"
+  context: string; // multi-line block for the system prompt
+  hasBaby: boolean; // any kid < 12 months
+  hasKids: boolean;
+  mealsPerWeek: number;
+  weeklyBudget: number | null;
+}
+
+const WEEKS_PER_MONTH = 4.345;
+
+export function describeHousehold(p: Preferences): HouseholdDescription {
+  const hasBaby = p.kids.some((k) => k.age_months < 12);
+  const hasKids = p.kids.length > 0;
+  const weeklyBudget = p.monthly_budget_usd != null
+    ? Math.round(p.monthly_budget_usd / WEEKS_PER_MONTH)
+    : null;
+
+  const people = [adultsPhrase(p.adults), ...p.kids.map(kidPhrase)];
+  const peopleSentence = joinList(people);
+  const serving = hasKids
+    ? `serves ${p.adults} + ${p.kids.length} kid${p.kids.length > 1 ? "s" : ""}`
+    : `serves ${p.adults}`;
+
+  const lines = [`This household:`, `- People: ${peopleSentence}.`];
+  lines.push(`- Dinners to plan per week: ${p.meals_per_week}.`);
+  if (weeklyBudget) {
+    lines.push(
+      `- Grocery budget: ~$${weeklyBudget}/week (from $${p.monthly_budget_usd}/month) across farmers market + grocery.`,
+    );
+  }
+  if (p.cuisines.length) {
+    lines.push(`- Cuisines they like: ${joinList(p.cuisines)}.`);
+  }
+
+  const safety: string[] = [];
+  if (hasBaby) {
+    safety.push(
+      "There's a baby under 1: pull a plain, soft, mashed, UNSALTED portion before salt/spice/acid; NO honey; no choking shapes.",
+    );
+  }
+  if (p.kids.some((k) => k.age_months >= 12 && k.age_months <= 48)) {
+    safety.push(
+      "There's a toddler: low spice, and quarter/halve choking shapes (whole grapes, nuts, popcorn, coins of sausage).",
+    );
+  }
+  if (safety.length) lines.push(`Food safety: ${safety.join(" ")}`);
+
+  return {
+    serving,
+    context: lines.join("\n"),
+    hasBaby,
+    hasKids,
+    mealsPerWeek: p.meals_per_week,
+    weeklyBudget,
+  };
+}
+
+function adultsPhrase(n: number): string {
+  if (n === 1) return "one adult";
+  if (n === 2) return "two adults";
+  return `${n} adults`;
+}
+
+function kidPhrase(k: Kid): string {
+  const m = k.age_months;
+  if (m < 12) return `a ${m}-month-old baby`;
+  const yrs = m / 12;
+  const rounded = Math.round(yrs * 2) / 2; // nearest half-year
+  const label = Number.isInteger(rounded)
+    ? `${rounded}`
+    : `${Math.floor(rounded)}½`;
+  return `a ${label}-year-old`;
+}
+
+function joinList(items: string[]): string {
+  if (items.length <= 1) return items.join("");
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
+}

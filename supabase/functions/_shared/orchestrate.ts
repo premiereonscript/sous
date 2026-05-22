@@ -9,7 +9,8 @@
 import { dbClient } from "./db.ts";
 import { completeRaw, type Msg, normalize } from "./anthropic.ts";
 import { sendMessage } from "./telegram.ts";
-import { SOUS_SYSTEM } from "./persona.ts";
+import { sousSystem } from "./persona.ts";
+import { describeHousehold, getPreferences } from "./household.ts";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 
 const WORKHORSE_MODEL = "claude-sonnet-4-6"; // SPEC §9.1
@@ -32,7 +33,7 @@ const RATE_MEAL_TOOL = {
   },
 };
 
-const SYSTEM = SOUS_SYSTEM +
+const RATE_INSTRUCTION =
   `\n\nIf the user signals how much they liked a specific dish, call rate_meal to log it (map clear sentiment to a 1-5 if they don't give a number), then acknowledge in one short line. Don't ask for a rating they didn't offer.`;
 
 export async function runOrchestrator(conversationId: string): Promise<string> {
@@ -47,6 +48,10 @@ export async function runOrchestrator(conversationId: string): Promise<string> {
     console.error("orchestrator: conversation not found", conversationId);
     return "";
   }
+
+  // Build the system prompt from this household's onboarding preferences.
+  const desc = describeHousehold(await getPreferences(db, convo.household_id));
+  const SYSTEM = sousSystem(desc.context) + RATE_INSTRUCTION;
 
   // Who sent the latest inbound turn (the rater).
   const { data: lastIn } = await db

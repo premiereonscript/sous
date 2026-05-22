@@ -14,6 +14,11 @@ import {
   type InlineKeyboard,
   sendMessage,
 } from "./telegram.ts";
+import {
+  describeHousehold,
+  getPreferences,
+  type HouseholdDescription,
+} from "./household.ts";
 
 const swapButton = (itemId: string): InlineKeyboard => ({
   inline_keyboard: [[{ text: "🔄 Swap this dish", callback_data: `s:${itemId}` }]],
@@ -36,7 +41,9 @@ const CUISINE_LABEL: Record<string, string> = {
   italian: "Italian",
   other: "Other",
 };
-const DAY_KEYS = ["mon", "tue", "wed", "thu", "fri"] as const;
+// Up to 7 dinners; the household picks how many (meals_per_week). The first N
+// weekdays are used. Mon–Thu are "weeknights" (≤45 min); Fri/Sat/Sun can stretch.
+const DAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
 type DayKey = typeof DAY_KEYS[number];
 const DAY_LABEL: Record<DayKey, string> = {
   mon: "Mon",
@@ -44,7 +51,10 @@ const DAY_LABEL: Record<DayKey, string> = {
   wed: "Wed",
   thu: "Thu",
   fri: "Fri",
+  sat: "Sat",
+  sun: "Sun",
 };
+const WEEKNIGHTS = new Set<DayKey>(["mon", "tue", "wed", "thu"]);
 
 interface Candidate {
   id: string;
@@ -94,17 +104,21 @@ export async function proposePlan(conversationId: string): Promise<void> {
     return;
   }
 
+  const desc = describeHousehold(await getPreferences(db, convo.household_id));
+
   const { data: candData, error: candErr } = await db.rpc("candidate_recipes", {
     p_window_days: 28,
     p_limit: 40,
   });
   if (candErr) console.error("planner: candidate_recipes failed", candErr);
   const candidates = (candData ?? []) as Candidate[];
-  if (candidates.length < 5) {
+  // Plan as many dinners as they asked for, capped by what's in rotation.
+  const n = Math.max(1, Math.min(desc.mealsPerWeek, candidates.length, 7));
+  if (candidates.length === 0) {
     await sendMessage(
       botToken,
       convo.telegram_chat_id,
-      "i don't have enough recipes in rotation to plan a full week yet.",
+      "i don't have any recipes in rotation to plan with yet.",
     );
     return;
   }
@@ -113,13 +127,13 @@ export async function proposePlan(conversationId: string): Promise<void> {
   const { toolUses } = await completeRaw({
     apiKey: Deno.env.get("ANTHROPIC_API_KEY")!,
     model: PLANNER_MODEL,
-    system: plannerSystem(candidates, weekOf),
+    system: plannerSystem(candidates, weekOf, desc, n),
     messages: [{
       role: "user",
       content:
-        `Plan the five dinners (Mon–Fri) for the week of ${weekOf}. Call propose_plan with exactly 5 items, one per day, choosing only from the candidate recipe_ids above.`,
+        `Plan ${n} dinner${n > 1 ? "s" : ""} for the week of ${weekOf}. Call propose_plan with exactly ${n} item${n > 1 ? "s" : ""}, choosing only from the candidate recipe_ids above.`,
     }],
-    tools: [PROPOSE_PLAN_TOOL],
+    tools: [proposePlanTool(n)],
     toolChoice: { type: "tool", name: "propose_plan" },
     maxTokens: 2048,
   });
@@ -127,8 +141,8 @@ export async function proposePlan(conversationId: string): Promise<void> {
   const call = toolUses.find((t) => t.name === "propose_plan");
   const rawItems = (call?.input?.items ?? []) as PlanItemInput[];
 
-  // Collect the distinct recipes the model picked (ignore its day assignment —
-  // we assign days ourselves below). The "why" travels with the recipe.
+  // Collect the distinct recipes the model picked (we assign days ourselves
+  // below). The "why" travels with the recipe.
   const byId = new Map(candidates.map((c) => [c.id, c]));
   const seen = new Set<string>();
   const picked: { cand: Candidate; why: string }[] = [];
@@ -137,7 +151,7 @@ export async function proposePlan(conversationId: string): Promise<void> {
     if (!cand || seen.has(cand.id)) continue;
     seen.add(cand.id);
     picked.push({ cand, why: (item.why ?? "").trim() });
-    if (picked.length === 5) break;
+    if (picked.length === n) break;
   }
 
   if (picked.length === 0) {
@@ -210,16 +224,19 @@ export async function proposePlan(conversationId: string): Promise<void> {
     return await sendMessage(botToken, convo.telegram_chat_id, text, "HTML", markup);
   };
 
+  const lastDay = chosen[chosen.length - 1].day;
+  const babyLine = desc.hasBaby
+    ? `\n🍼 <i>Baby: pull a plain, soft, unsalted spoonful before salt/spice/acid — no honey.</i>`
+    : "";
   await post(
-    `🗒️ <b>Your week · ${esc(fmt(weekOf))}–${esc(fmt(dayDate(weekOf, "fri")))}</b>\n` +
-      `Five dinners below, then the shopping list. Tap 🔄 to swap any dish. Sat &amp; Sun stay DIY 🍳\n` +
-      `🍼 <i>Baby (9mo): pull a plain, soft, unsalted spoonful before salt/spice/acid — no honey.</i>`,
+    `🗒️ <b>Your week · ${esc(fmt(weekOf))}–${esc(fmt(dayDate(weekOf, lastDay)))}</b>\n` +
+      `${chosen.length} dinner${chosen.length > 1 ? "s" : ""} below, then the shopping list. Tap 🔄 to swap any dish.${babyLine}`,
   );
 
   for (const c of chosen) {
     const itemId = itemIdByRecipe.get(c.cand.id);
     await post(
-      renderCard(c, fullById.get(c.cand.id)),
+      renderCard(c, fullById.get(c.cand.id), desc),
       itemId ? swapButton(itemId) : undefined,
     );
   }
@@ -274,10 +291,11 @@ export async function swapMeal(
 
   const { data: convo } = await db
     .from("conversations")
-    .select("id, telegram_chat_id, state_payload")
+    .select("id, household_id, telegram_chat_id, state_payload")
     .eq("id", conversationId)
     .maybeSingle();
   if (!convo) return;
+  const desc = describeHousehold(await getPreferences(db, convo.household_id));
 
   const { data: item } = await db
     .from("meal_plan_items")
@@ -366,6 +384,7 @@ export async function swapMeal(
   const cardText = renderCard(
     { day: dayKey, cand, why },
     full as RecipeFull | undefined,
+    desc,
   );
   if (cardMessageId) {
     await editMessageText(
@@ -503,8 +522,7 @@ function arrangeDays(
   const valid = (perm: number[]): boolean => {
     for (let i = 0; i < n; i++) {
       const cand = picked[perm[i]].cand;
-      const isFriday = days[i] === "fri";
-      if (!isFriday && cand.time_minutes > 45) return false; // weeknight cap
+      if (WEEKNIGHTS.has(days[i]) && cand.time_minutes > 45) return false; // weeknight cap
       if (i > 0 && picked[perm[i - 1]].cand.cuisine_tag === cand.cuisine_tag) {
         return false; // no consecutive cuisine
       }
@@ -532,7 +550,16 @@ function permutations(arr: number[]): number[][] {
 
 function dateToDayKey(dateStr: string): DayKey {
   const dow = new Date(`${dateStr}T00:00:00Z`).getUTCDay(); // 0 Sun..6 Sat
-  return (["mon", "tue", "wed", "thu", "fri"][dow - 1] as DayKey) ?? "mon";
+  const map: Record<number, DayKey> = {
+    1: "mon",
+    2: "tue",
+    3: "wed",
+    4: "thu",
+    5: "fri",
+    6: "sat",
+    0: "sun",
+  };
+  return map[dow] ?? "mon";
 }
 
 // ---- natural-language entry points (no button/message id) ----------------
@@ -599,6 +626,7 @@ export async function swapByDay(
 function renderCard(
   c: { day: DayKey; cand: Candidate; why: string },
   full: RecipeFull | undefined,
+  desc: HouseholdDescription,
 ): string {
   const cand = c.cand;
   const emoji = CUISINE_EMOJI[cand.cuisine_tag] ?? "🍽️";
@@ -609,32 +637,32 @@ function renderCard(
 
   // body_md = description paragraph, then a blank line, then numbered steps.
   const body = full?.body_md ?? cand.description;
-  const [desc, ...rest] = body.split("\n\n");
+  const [intro, ...rest] = body.split("\n\n");
   const steps = rest.join("\n\n").trim();
 
   const lines: string[] = [];
   lines.push(`${emoji} <b>${esc(DAY_LABEL[c.day])} · ${esc(cand.title)}</b>`);
   lines.push(
-    `<i>${esc(cuisine)} · ${cand.time_minutes} min · serves 2 + toddler + baby</i>${stars}`,
+    `<i>${esc(cuisine)} · ${cand.time_minutes} min · ${esc(desc.serving)}</i>${stars}`,
   );
   if (c.why) {
     lines.push("");
     lines.push(`💡 <i>${esc(c.why.trim())}</i>`);
   }
   lines.push("");
-  lines.push(esc(desc.trim()));
+  lines.push(esc(intro.trim()));
   if (steps) {
     lines.push("");
     lines.push("👩‍🍳 <b>Make it</b>");
     lines.push(formatSteps(steps));
   }
 
-  // Toddler version (the prep fork — both dishes on one card).
-  const toddler = full?.toddler_variant_notes ?? cand.toddler_variant_notes;
-  if (toddler) {
+  // Kid version (the prep fork) — only when there are kids in the household.
+  const kidNote = full?.toddler_variant_notes ?? cand.toddler_variant_notes;
+  if (desc.hasKids && kidNote) {
     lines.push("");
-    lines.push("👶 <b>Toddler (2½)</b>");
-    lines.push(esc(toddler.trim()));
+    lines.push(desc.hasBaby ? "👶 <b>For the little ones</b>" : "👶 <b>For the kids</b>");
+    lines.push(esc(kidNote.trim()));
   }
   if (cand.ingredients?.includes("eggs")) {
     lines.push("");
@@ -682,40 +710,48 @@ function trimNum(n: number): string {
 }
 
 // ---- propose_plan tool schema (SPEC §9.4) -------------------------------
-const PROPOSE_PLAN_TOOL = {
-  name: "propose_plan",
-  description:
-    "Write the draft 5-dinner plan for the week. Provide exactly five items, one for each weekday Mon–Fri, each referencing a candidate recipe_id.",
-  input_schema: {
-    type: "object",
-    properties: {
-      items: {
-        type: "array",
-        minItems: 5,
-        maxItems: 5,
+// We assign days ourselves (arrangeDays), so the tool just returns N distinct
+// recipe picks. Built per-request so minItems/maxItems match the meal count.
+function proposePlanTool(n: number) {
+  return {
+    name: "propose_plan",
+    description:
+      `Write the draft dinner plan for the week. Provide exactly ${n} distinct items, each referencing a candidate recipe_id.`,
+    input_schema: {
+      type: "object",
+      properties: {
         items: {
-          type: "object",
-          properties: {
-            day: { type: "string", enum: ["mon", "tue", "wed", "thu", "fri"] },
-            recipe_id: {
-              type: "string",
-              description: "uuid of a recipe from the candidate list",
+          type: "array",
+          minItems: n,
+          maxItems: n,
+          items: {
+            type: "object",
+            properties: {
+              recipe_id: {
+                type: "string",
+                description: "uuid of a recipe from the candidate list",
+              },
+              why: {
+                type: "string",
+                description:
+                  "one short rationale tied to variety, season, ingredient overlap, or feedback",
+              },
             },
-            why: {
-              type: "string",
-              description:
-                "one short rationale tied to variety, season, ingredient overlap, or feedback",
-            },
+            required: ["recipe_id", "why"],
           },
-          required: ["day", "recipe_id", "why"],
         },
       },
+      required: ["items"],
     },
-    required: ["items"],
-  },
-};
+  };
+}
 
-function plannerSystem(candidates: Candidate[], weekOf: string): string {
+function plannerSystem(
+  candidates: Candidate[],
+  weekOf: string,
+  desc: HouseholdDescription,
+  n: number,
+): string {
   const menu = candidates
     .map((c) => {
       const rating = c.avg_rating != null
@@ -724,23 +760,28 @@ function plannerSystem(candidates: Candidate[], weekOf: string): string {
       return `- ${c.id} | ${CUISINE_LABEL[c.cuisine_tag] ?? c.cuisine_tag} | ${c.time_minutes}min | ${rating} | ${c.title} | ingredients: ${c.ingredients.join(", ")}`;
     })
     .join("\n");
-  return `You are the planner for Goodbye Fresh, choosing 5 weeknight dinners (Mon–Fri) for one family: two adventurous adults, a 2½-year-old (low spice, choking-hazard age), and a 9-month-old baby (soft, mashed, unsalted portions; no honey). Today is ${
+  const budgetLine = desc.weeklyBudget
+    ? `they shop one farmers-market + grocery run, ~$${desc.weeklyBudget}/week`
+    : "they shop one farmers-market + grocery run";
+  return `You are the planner for this household, choosing ${n} dinner${n > 1 ? "s" : ""} for the week. Today is ${
     new Date().toISOString().slice(0, 10)
   }; you are planning the week of ${weekOf}.
+
+${desc.context}
 
 Pick ONLY from these candidate recipes (use the recipe_id verbatim):
 ${menu}
 
-Rules (SPEC §8), in priority order:
-1. Exactly 5 distinct recipes, one per weekday Mon–Fri.
-2. Cuisine variety: represent all of Mexican, Asian, and Italian across the week; never the same cuisine on two consecutive days.
-3. Weeknight cook time: Mon–Thu must be ≤45 min. Friday may run longer if it earns it.
-4. Ingredient overlap for cost: prefer a set where several ingredients repeat across 2+ meals (the family shops one farmers-market + grocery run, ~$250/week). Eggs are free (backyard chickens) — a mild plus, not required.
+Rules, in priority order:
+1. Exactly ${n} distinct recipes.
+2. Cuisine variety: lean into the cuisines they like; spread cuisines across the week (we'll order the days so none repeat back-to-back).
+3. Weeknight cook time: most picks should be ≤45 min active; one longer "project" dish is fine.
+4. Ingredient overlap for cost: prefer a set where several ingredients repeat across 2+ meals (${budgetLine}). Eggs are free (backyard chickens) — a mild plus.
 5. Include at least one leftover-friendly dinner.
-6. Little-ones-safe: every pick already carries a toddler variant, and a plain soft portion can be pulled for the baby — favor dishes where that's easy.
+6. Kid-safe where relevant: picks carry a kid variant, and a plain soft portion can be pulled for any baby — favor dishes where that's easy.
 7. Ratings: strongly prefer dishes rated 4–5/5; avoid 1–2/5 unless variety forces it (down-weight, don't ban). Treat "unrated" as neutral and fine to try.
 
-Then call propose_plan with the 5 items. The "why" for each should be one honest, specific line (variety, season, overlap, or a callback) — no marketing voice.`;
+Then call propose_plan with ${n} items. Each "why" is one honest, specific line (variety, season, overlap, or a callback) — no marketing voice.`;
 }
 
 // ---- date helpers --------------------------------------------------------

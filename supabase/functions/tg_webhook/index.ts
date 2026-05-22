@@ -7,6 +7,8 @@
 import { getEnv } from "../_shared/env.ts";
 import { dbClient } from "../_shared/db.ts";
 import { runOrchestrator } from "../_shared/orchestrate.ts";
+import { runOnboarding } from "../_shared/onboarding.ts";
+import { getPreferences } from "../_shared/household.ts";
 import {
   lockActivePlan,
   lockPlan,
@@ -114,8 +116,21 @@ Deno.serve(async (req: Request): Promise<Response> => {
   return ok();
 });
 
-// Dispatch a text message: explicit /plan, else Haiku-classified intent.
+// Dispatch a text message. A household that hasn't finished onboarding goes to
+// the onboarding flow first; after that, /plan is a fast-path and everything
+// else is Haiku-classified.
 async function routeMessage(conversationId: string, text: string): Promise<void> {
+  const db = dbClient();
+  const { data: convo } = await db
+    .from("conversations")
+    .select("household_id")
+    .eq("id", conversationId)
+    .maybeSingle();
+  if (convo) {
+    const prefs = await getPreferences(db, convo.household_id);
+    if (!prefs.onboarded) return runOnboarding(conversationId);
+  }
+
   if (/^\/plan\b/i.test(text)) return proposePlan(conversationId);
 
   const { intent, day } = await classifyIntent(text);
