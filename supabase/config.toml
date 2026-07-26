@@ -302,6 +302,10 @@ verify_jwt = true
 [functions.kickoff_week]
 verify_jwt = false
 
+# Triggered on demand via trigger_send_list_now(); gated by x-kickoff-secret.
+[functions.send_list]
+verify_jwt = false
+
 [analytics]
 enabled = true
 port = 54327
