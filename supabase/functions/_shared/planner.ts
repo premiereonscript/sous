@@ -20,8 +20,13 @@ import {
   type HouseholdDescription,
 } from "./household.ts";
 
-const swapButton = (itemId: string): InlineKeyboard => ({
-  inline_keyboard: [[{ text: "🔄 Swap this dish", callback_data: `s:${itemId}` }]],
+// Each recipe card carries two actions: swap this day's dish (s:<item_id>) and
+// expand it into a full, detailed recipe (r:<recipe_id>).
+const cardButtons = (itemId: string, recipeId: string): InlineKeyboard => ({
+  inline_keyboard: [[
+    { text: "🔄 Swap", callback_data: `s:${itemId}` },
+    { text: "📖 Full recipe", callback_data: `r:${recipeId}` },
+  ]],
 });
 const lockButton = (planId: string): InlineKeyboard => ({
   inline_keyboard: [[{ text: "✅ Lock the week", callback_data: `l:${planId}` }]],
@@ -43,8 +48,8 @@ const CUISINE_LABEL: Record<string, string> = {
 };
 // Up to 7 dinners; the household picks how many (meals_per_week). The first N
 // weekdays are used. Mon–Thu are "weeknights" (≤45 min); Fri/Sat/Sun can stretch.
-const DAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
-type DayKey = typeof DAY_KEYS[number];
+export const DAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
+export type DayKey = typeof DAY_KEYS[number];
 const DAY_LABEL: Record<DayKey, string> = {
   mon: "Mon",
   tue: "Tue",
@@ -115,6 +120,7 @@ export async function proposePlan(conversationId: string): Promise<void> {
   const { data: candData, error: candErr } = await db.rpc("candidate_recipes", {
     p_window_days: 28,
     p_limit: 40,
+    p_household_id: convo.household_id,
   });
   if (candErr) console.error("planner: candidate_recipes failed", candErr);
   const candidates = (candData ?? []) as Candidate[];
@@ -246,7 +252,7 @@ export async function proposePlan(conversationId: string): Promise<void> {
     const itemId = itemIdByRecipe.get(c.cand.id);
     await post(
       renderCard(c, fullById.get(c.cand.id), desc),
-      itemId ? swapButton(itemId) : undefined,
+      itemId ? cardButtons(itemId, c.cand.id) : undefined,
     );
   }
 
@@ -294,6 +300,7 @@ export async function swapMeal(
   conversationId: string,
   itemId: string,
   cardMessageId?: number,
+  request?: string,
 ): Promise<void> {
   const db = dbClient();
   const botToken = Deno.env.get("TELEGRAM_BOT_TOKEN")!;
@@ -338,6 +345,7 @@ export async function swapMeal(
   const { data: candData } = await db.rpc("candidate_recipes", {
     p_window_days: 28,
     p_limit: 40,
+    p_household_id: convo.household_id,
   });
   const base = ((candData ?? []) as Candidate[]).filter((c) => !inPlan.has(c.id));
   if (base.length === 0) {
@@ -366,15 +374,19 @@ export async function swapMeal(
     !neighborCuisines.has(c.cuisine_tag) && (!isWeeknight || c.time_minutes <= 45)
   );
   if (pool.length === 0) pool = base;
+
+  // If the household filtered the pool by asking for something specific
+  // ("something vegetarian", "no fish", "give me tacos"), keep that request in
+  // front of the model so the pick actually honors it instead of being random.
+  const req = (request ?? "").trim();
+  const userAsk = req
+    ? `Swap ${DAY_LABEL[dayKey]}'s dinner. The household asked: "${req}". Honor that as closely as the candidates allow. Call swap_meal.`
+    : `Swap ${DAY_LABEL[dayKey]}'s dinner for a different candidate. Call swap_meal.`;
   const { toolUses } = await completeRaw({
     apiKey: Deno.env.get("ANTHROPIC_API_KEY")!,
     model: PLANNER_MODEL,
-    system: swapSystem(pool, week, dayKey),
-    messages: [{
-      role: "user",
-      content:
-        `Swap ${DAY_LABEL[dayKey]}'s dinner for a different candidate. Call swap_meal.`,
-    }],
+    system: swapSystem(pool, week, dayKey, req),
+    messages: [{ role: "user", content: userAsk }],
     tools: [SWAP_MEAL_TOOL],
     toolChoice: { type: "tool", name: "swap_meal" },
     maxTokens: 1024,
@@ -412,7 +424,7 @@ export async function swapMeal(
       cardMessageId,
       cardText,
       "HTML",
-      swapButton(item.id),
+      cardButtons(item.id, cand.id),
     );
   } else {
     await sendMessage(
@@ -420,7 +432,7 @@ export async function swapMeal(
       convo.telegram_chat_id,
       `🔄 New pick for ${DAY_LABEL[dayKey]}:\n\n${cardText}`,
       "HTML",
-      swapButton(item.id),
+      cardButtons(item.id, cand.id),
     );
   }
 
@@ -508,6 +520,7 @@ function swapSystem(
   pool: Candidate[],
   weekItems: WeekItem[],
   dayKey: DayKey,
+  request?: string,
 ): string {
   const week = weekItems
     .map((w) =>
@@ -517,9 +530,14 @@ function swapSystem(
   const menu = pool
     .map((c) => {
       const rating = c.avg_rating != null ? `rated ${c.avg_rating}/5` : "unrated";
-      return `- ${c.id} | ${CUISINE_LABEL[c.cuisine_tag] ?? c.cuisine_tag} | ${c.time_minutes}min | ${rating} | ${c.title}`;
+      const tags = c.ingredients?.length ? ` | ${c.ingredients.join(", ")}` : "";
+      return `- ${c.id} | ${CUISINE_LABEL[c.cuisine_tag] ?? c.cuisine_tag} | ${c.time_minutes}min | ${rating} | ${c.title}${tags}`;
     })
     .join("\n");
+  const req = (request ?? "").trim();
+  const askBlock = req
+    ? `\nThe household specifically asked for: "${req}". Treat this as the TOP priority — pick the candidate that best matches it (use the cuisine/time/ingredients to judge fit). If nothing matches well, pick the closest and you'll note the tradeoff in "why".\n`
+    : "";
   return `You are adjusting one dinner in an existing week for Goodbye Fresh. Replace ${DAY_LABEL[dayKey]}'s dinner.
 
 Current week:
@@ -527,7 +545,7 @@ ${week}
 
 Replacement candidates (pick one recipe_id, none are already in the week):
 ${menu}
-
+${askBlock}
 Keep the week valid (SPEC §8): don't repeat a cuisine on consecutive days, keep ${DAY_LABEL[dayKey]} ≤45 min if it's Mon–Thu, favor 4–5/5 ratings, and keep variety. Then call swap_meal.`;
 }
 
@@ -603,10 +621,13 @@ export async function lockActivePlan(conversationId: string): Promise<void> {
   await lockPlan(conversationId, convo.active_plan_id);
 }
 
-// "swap wednesday" — swap a given day's dinner in the active plan.
+// "swap wednesday" — swap a given day's dinner in the active plan. `request`
+// carries the household's own words ("...for something vegetarian") so the pick
+// honors it.
 export async function swapByDay(
   conversationId: string,
   dayKey: DayKey,
+  request?: string,
 ): Promise<void> {
   const db = dbClient();
   const botToken = Deno.env.get("TELEGRAM_BOT_TOKEN")!;
@@ -639,7 +660,150 @@ export async function swapByDay(
     );
     return;
   }
-  await swapMeal(conversationId, match.id); // no message id -> posts a fresh card
+  await swapMeal(conversationId, match.id, undefined, request); // no message id -> posts a fresh card
+}
+
+// ---- expand one dish into a full, detailed recipe (callback `r:<recipe_id>`) --
+// The terse card is deliberately short; this is the "give me the real recipe"
+// view. Ingredient quantities come straight from the DB (never invented); the
+// model only enriches the method + adds a couple of technique notes in Sous's
+// voice. Sent as its own message so it doesn't disturb the plan cards.
+export async function expandRecipe(
+  conversationId: string,
+  recipeId: string,
+): Promise<void> {
+  const db = dbClient();
+  const botToken = Deno.env.get("TELEGRAM_BOT_TOKEN")!;
+
+  const { data: convo } = await db
+    .from("conversations")
+    .select("id, household_id, telegram_chat_id")
+    .eq("id", conversationId)
+    .maybeSingle();
+  if (!convo) return;
+  const desc = describeHousehold(await getPreferences(db, convo.household_id));
+
+  const { data: recipe } = await db
+    .from("recipes")
+    .select("id, title, cuisine_tag, time_minutes, body_md, toddler_variant_notes")
+    .eq("id", recipeId)
+    .maybeSingle();
+  if (!recipe) return;
+
+  const { data: ingRows } = await db
+    .from("recipe_ingredients")
+    .select("quantity, unit, optional, ingredients(name_canonical)")
+    .eq("recipe_id", recipeId);
+  const ings = (ingRows ?? []).map((r: Record<string, unknown>) => {
+    const ing = Array.isArray(r.ingredients) ? r.ingredients[0] : r.ingredients;
+    return {
+      name: String((ing as { name_canonical?: string })?.name_canonical ?? "").trim(),
+      quantity: r.quantity as number | null,
+      unit: String(r.unit ?? "").trim(),
+      optional: Boolean(r.optional),
+    };
+  }).filter((i) => i.name);
+
+  const [intro, ...rest] = (recipe.body_md ?? "").split("\n\n");
+  const terseSteps = rest.join("\n\n").trim();
+  const ingredientLines = ings
+    .map((i) => {
+      const qty = i.quantity != null ? `${trimNum(i.quantity)} ${i.unit}`.trim() : i.unit;
+      return `• ${qty ? `${qty} ` : ""}${i.name}${i.optional ? " (optional)" : ""}`;
+    })
+    .join("\n");
+
+  // Ask the model for an expanded method + tips only — data stays authoritative.
+  const { text } = await completeRaw({
+    apiKey: Deno.env.get("ANTHROPIC_API_KEY")!,
+    model: PLANNER_MODEL,
+    system:
+      `You are Sous. Expand a terse recipe into a detailed, confident, easy-to-follow method — the "here's how you actually nail it" version. Punchy Sous voice, but this is a real recipe someone is cooking from, so be genuinely useful and specific (heat levels, doneness cues, timing, order of operations).
+
+Return ONLY two sections, in this exact shape, no preamble:
+
+METHOD
+1. step
+2. step
+(as many numbered steps as the dish honestly needs — more granular than the terse version)
+
+TIPS
+- one sharp technique or make-ahead/leftover tip
+- a second tip
+(2–3 tips max)
+
+Plain text only, no markdown bold/headers beyond the literal words METHOD and TIPS. Do not restate the ingredient list. Do not add commentary before or after.`,
+    messages: [{
+      role: "user",
+      content:
+        `Dish: ${recipe.title} (${CUISINE_LABEL[recipe.cuisine_tag] ?? recipe.cuisine_tag}, ~${recipe.time_minutes} min)\n` +
+        `One-liner: ${intro.trim()}\n\n` +
+        `Ingredients on hand (sized for this household):\n${ingredientLines}\n\n` +
+        `Terse steps to expand:\n${terseSteps || "(none given — write the method from scratch)"}`,
+    }],
+    maxTokens: 1200,
+  });
+
+  const [methodBlock, tipsBlock] = splitMethodTips(text);
+  const emoji = CUISINE_EMOJI[recipe.cuisine_tag] ?? "🍽️";
+
+  const lines: string[] = [];
+  lines.push(`${emoji} <b>${esc(recipe.title)} — full recipe</b>`);
+  lines.push(
+    `<i>${esc(CUISINE_LABEL[recipe.cuisine_tag] ?? "Other")} · ${recipe.time_minutes} min · ${esc(desc.serving)}</i>`,
+  );
+  lines.push("");
+  lines.push(`🧾 <b>Ingredients</b>`);
+  lines.push(esc(ingredientLines));
+  lines.push("");
+  lines.push(`👩‍🍳 <b>Method</b>`);
+  lines.push(methodBlock ? formatSteps(methodBlock) : formatSteps(terseSteps));
+  if (tipsBlock) {
+    lines.push("");
+    lines.push(`💡 <b>Chef's notes</b>`);
+    lines.push(esc(tipsBlock));
+  }
+  const kidNote = recipe.toddler_variant_notes;
+  if (desc.hasKids && kidNote) {
+    lines.push("");
+    lines.push(desc.hasBaby ? "👶 <b>For the little ones</b>" : "👶 <b>For the kids</b>");
+    lines.push(esc(String(kidNote).trim()));
+  }
+  if (desc.hasBaby) {
+    lines.push("");
+    lines.push(
+      "🍼 <i>Baby: pull a plain, soft, unsalted spoonful before salt/spice/acid — no honey.</i>",
+    );
+  }
+
+  const out = lines.join("\n");
+  await db.from("messages").insert({
+    conversation_id: convo.id,
+    direction: "out",
+    text: out,
+  });
+  await sendMessage(botToken, convo.telegram_chat_id, out, "HTML");
+}
+
+// Split the model's "METHOD ... TIPS ..." reply into its two blocks.
+function splitMethodTips(text: string): [string, string] {
+  const t = (text ?? "").trim();
+  if (!t) return ["", ""];
+  const tipsIdx = t.search(/^\s*TIPS\s*$/im);
+  let method = t;
+  let tips = "";
+  if (tipsIdx >= 0) {
+    method = t.slice(0, tipsIdx);
+    tips = t.slice(tipsIdx).replace(/^\s*TIPS\s*$/im, "").trim();
+  }
+  method = method.replace(/^\s*METHOD\s*$/im, "").trim();
+  // Normalize "- tip" bullets to "• tip" for Telegram.
+  tips = tips
+    .split("\n")
+    .map((l) => l.replace(/^\s*[-*]\s*/, "• ").trimEnd())
+    .filter((l) => l.trim())
+    .join("\n");
+  return [method, tips];
 }
 
 function renderCard(

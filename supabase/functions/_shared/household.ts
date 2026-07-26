@@ -44,6 +44,49 @@ export async function getPreferences(
   };
 }
 
+// Partial update to a household's preferences — only the provided fields
+// change. Used by the chat agent so cuisines/budget/meals/kids can be edited
+// any time, not just during first-run onboarding.
+export interface PreferenceUpdate {
+  adults?: number;
+  kids?: Kid[];
+  meals_per_week?: number;
+  monthly_budget_usd?: number | null;
+  cuisines?: string[];
+}
+
+export async function updatePreferences(
+  db: SupabaseClient,
+  householdId: string,
+  patch: PreferenceUpdate,
+): Promise<Preferences> {
+  const current = await getPreferences(db, householdId);
+  const next: Preferences = { ...current, onboarded: true };
+  if (patch.adults !== undefined) next.adults = patch.adults;
+  if (patch.kids !== undefined) next.kids = patch.kids;
+  if (patch.meals_per_week !== undefined) next.meals_per_week = patch.meals_per_week;
+  if (patch.monthly_budget_usd !== undefined) {
+    next.monthly_budget_usd = patch.monthly_budget_usd;
+  }
+  if (patch.cuisines !== undefined) next.cuisines = patch.cuisines;
+
+  const { error } = await db.from("household_preferences").upsert(
+    {
+      household_id: householdId,
+      adults: next.adults,
+      kids: next.kids,
+      meals_per_week: next.meals_per_week,
+      monthly_budget_usd: next.monthly_budget_usd,
+      cuisines: next.cuisines,
+      onboarded: true,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "household_id" },
+  );
+  if (error) console.error("updatePreferences failed", error);
+  return next;
+}
+
 export interface HouseholdDescription {
   serving: string; // e.g. "serves 2 adults + 2 kids"
   context: string; // multi-line block for the system prompt

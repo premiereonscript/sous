@@ -15,7 +15,7 @@ import { sendMessage } from "../_shared/telegram.ts";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
 
-const GREETING = "Happy Friday ☕ Pulling together next week's five dinners — one sec.\n" +
+const GREETING = "Fresh dinners incoming ☕ — pulling your week together, one sec.\n" +
   "(Rate last week's hits any time — just tell me, e.g. “the tacos were a 5”.)";
 
 Deno.serve((req: Request): Response => {

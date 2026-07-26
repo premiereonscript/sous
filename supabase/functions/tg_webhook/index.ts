@@ -10,6 +10,7 @@ import { runOrchestrator } from "../_shared/orchestrate.ts";
 import { runOnboarding } from "../_shared/onboarding.ts";
 import { getPreferences } from "../_shared/household.ts";
 import {
+  expandRecipe,
   lockActivePlan,
   lockPlan,
   proposePlan,
@@ -61,6 +62,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
         work = swapMeal(conversationId, data.slice(2), msgId);
       } else if (data.startsWith("l:")) {
         work = lockPlan(conversationId, data.slice(2));
+      } else if (data.startsWith("r:")) {
+        work = expandRecipe(conversationId, data.slice(2));
       }
       if (work) {
         const w = work.catch((e) => console.error("callback work failed", e));
@@ -136,8 +139,11 @@ async function routeMessage(conversationId: string, text: string): Promise<void>
   const { intent, day } = await classifyIntent(text);
   if (intent === "plan") return proposePlan(conversationId);
   if (intent === "lock") return lockActivePlan(conversationId);
-  if (intent === "swap" && day) return swapByDay(conversationId, day);
-  // chat, ratings, or an under-specified swap -> conversational orchestrator.
+  // Pass the raw message as the swap request so "swap thursday for something
+  // vegetarian" honors the "vegetarian" part instead of picking at random.
+  if (intent === "swap" && day) return swapByDay(conversationId, day, text);
+  // chat, ratings, or an under-specified swap -> conversational orchestrator
+  // (which can itself swap/plan/exclude/expand/rate/adjust prefs).
   await runOrchestrator(conversationId);
 }
 
