@@ -24,6 +24,7 @@ import {
   expandRecipe,
   lockActivePlan,
   proposePlan,
+  sendShoppingList,
   swapByDay,
 } from "./planner.ts";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
@@ -129,10 +130,21 @@ const TOOLS = [
       required: ["recipe_title"],
     },
   },
+  {
+    name: "send_shopping_list",
+    description:
+      "Post the current week's shopping list as a fresh message (farmers market + grocery, always up to date with any swaps). Use ANY time the user asks for the list — 'send me the grocery list', 'what do I need to buy', 'updated shopping list', 'text me the list'. Never tell the user to scroll up; just send it.",
+    input_schema: { type: "object", properties: {} },
+  },
 ];
 
 const AGENT_INSTRUCTION =
-  `\n\nYou can DO things, not just talk — use the tools when the user wants an action (swap, plan, lock, rate, exclude, change preferences, or a full recipe). Some tools post their own message (a card, a plan, a recipe); when they do, keep your own reply to one short line so you're not repeating what the card already shows. Never claim you did something without calling the matching tool. You can see the current week and recent history below — use them to answer honestly (e.g. how often a dish has actually come up); never guess or wave it away.`;
+  `\n\nYou can DO things, not just talk — use the tools when the user wants an action (swap, plan, lock, rate, exclude, change preferences, a full recipe, or the shopping list). Some tools post their own message (a card, a plan, a recipe, the list); when they do, keep your own reply to one short line so you're not repeating what it shows. Never claim you did something without calling the matching tool.
+
+Key rules:
+- If they ask for the grocery/shopping list in ANY form, call send_shopping_list. NEVER say you can't send it and NEVER tell them to scroll up — the list is always available.
+- You work from a fixed set of recipes, so you can't edit a single recipe's ingredients (e.g. literally "add sausage to THIS pesto pasta"). If they want a change like that, the right move is swap_meal to a dish that already fits ("something with meat", "a meaty pasta") and then say plainly what you swapped in — don't pretend you edited the original, and don't ask them for a title you can look up yourself.
+- You can see the current week and recent history below — use them to answer honestly (e.g. how often a dish has come up); never guess or wave it away.`;
 
 export async function runOrchestrator(conversationId: string): Promise<string> {
   const db = dbClient();
@@ -243,8 +255,16 @@ async function runTool(
         const day = asDay(input.day);
         if (!day) return "need a valid weekday to swap";
         const request = input.request ? String(input.request) : undefined;
-        await swapByDay(convo.id, day, request);
-        return `swapped ${day} — a new card was posted to the chat`;
+        const newTitle = await swapByDay(convo.id, day, request);
+        return newTitle
+          ? `swapped ${day} to "${newTitle}" — its card was posted to the chat. If they want the recipe, call expand_recipe with that exact title.`
+          : `couldn't swap ${day} — there may be no active plan or no fresh options; tell the user plainly`;
+      }
+      case "send_shopping_list": {
+        const ok = await sendShoppingList(convo.id);
+        return ok
+          ? "posted the up-to-date shopping list to the chat"
+          : "no active plan to build a list from";
       }
       case "plan_week":
         await proposePlan(convo.id);

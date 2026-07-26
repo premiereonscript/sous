@@ -296,12 +296,14 @@ const SWAP_MEAL_TOOL = {
   },
 };
 
+// Returns the title of the dish it swapped in (or null if it couldn't), so a
+// caller/agent can tell the user what landed and chain a follow-up.
 export async function swapMeal(
   conversationId: string,
   itemId: string,
   cardMessageId?: number,
   request?: string,
-): Promise<void> {
+): Promise<string | null> {
   const db = dbClient();
   const botToken = Deno.env.get("TELEGRAM_BOT_TOKEN")!;
 
@@ -310,7 +312,7 @@ export async function swapMeal(
     .select("id, household_id, telegram_chat_id, state_payload")
     .eq("id", conversationId)
     .maybeSingle();
-  if (!convo) return;
+  if (!convo) return null;
   const desc = describeHousehold(await getPreferences(db, convo.household_id));
 
   const { data: item } = await db
@@ -318,7 +320,7 @@ export async function swapMeal(
     .select("id, day, plan_id, recipe_id")
     .eq("id", itemId)
     .maybeSingle();
-  if (!item) return;
+  if (!item) return null;
 
   const { data: plan } = await db
     .from("meal_plans")
@@ -354,7 +356,7 @@ export async function swapMeal(
       convo.telegram_chat_id,
       "i'm out of fresh options that keep the week varied — try locking or tell me what you want.",
     );
-    return;
+    return null;
   }
 
   const dayKey = dateToDayKey(item.day);
@@ -455,6 +457,7 @@ export async function swapMeal(
     direction: "out",
     text: `[swapped ${DAY_LABEL[dayKey]} → ${cand.title}]`,
   });
+  return cand.title;
 }
 
 // ---- lock the week (callback `l:<plan_id>`) -----------------------------
@@ -628,7 +631,7 @@ export async function swapByDay(
   conversationId: string,
   dayKey: DayKey,
   request?: string,
-): Promise<void> {
+): Promise<string | null> {
   const db = dbClient();
   const botToken = Deno.env.get("TELEGRAM_BOT_TOKEN")!;
   const { data: convo } = await db
@@ -642,7 +645,7 @@ export async function swapByDay(
       convo?.telegram_chat_id ?? 0,
       "there's no plan to change yet — say “plan the week” first.",
     );
-    return;
+    return null;
   }
   // Find the meal_plan_item for that weekday in the active plan.
   const { data: items } = await db
@@ -658,9 +661,52 @@ export async function swapByDay(
       convo.telegram_chat_id,
       `i don't see a ${DAY_LABEL[dayKey]} dinner in the current plan.`,
     );
-    return;
+    return null;
   }
-  await swapMeal(conversationId, match.id, undefined, request); // no message id -> posts a fresh card
+  // no message id -> posts a fresh card
+  return await swapMeal(conversationId, match.id, undefined, request);
+}
+
+// "send me the grocery list" — (re)build the current plan's shopping list and
+// post it as a fresh message. The list is always live-generated from the plan's
+// items, so this reflects any swaps. Returns false if there's no active plan.
+export async function sendShoppingList(conversationId: string): Promise<boolean> {
+  const db = dbClient();
+  const botToken = Deno.env.get("TELEGRAM_BOT_TOKEN")!;
+  const { data: convo } = await db
+    .from("conversations")
+    .select("active_plan_id, telegram_chat_id")
+    .eq("id", conversationId)
+    .maybeSingle();
+  if (!convo?.active_plan_id) {
+    await sendMessage(
+      botToken,
+      convo?.telegram_chat_id ?? 0,
+      "no plan yet — say “plan the week” and I'll build the list.",
+    );
+    return false;
+  }
+
+  const { data: plan } = await db
+    .from("meal_plans")
+    .select("week_of")
+    .eq("id", convo.active_plan_id)
+    .maybeSingle();
+  const { data: listRows } = await db.rpc("generate_shopping_list", {
+    p_plan_id: convo.active_plan_id,
+  });
+
+  const text = renderShoppingList(
+    plan?.week_of ?? "",
+    (listRows ?? []) as ShoppingRow[],
+  );
+  await db.from("messages").insert({
+    conversation_id: conversationId,
+    direction: "out",
+    text,
+  });
+  await sendMessage(botToken, convo.telegram_chat_id, text, "HTML");
+  return true;
 }
 
 // ---- expand one dish into a full, detailed recipe (callback `r:<recipe_id>`) --

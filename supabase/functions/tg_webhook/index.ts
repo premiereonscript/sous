@@ -141,7 +141,10 @@ async function routeMessage(conversationId: string, text: string): Promise<void>
   if (intent === "lock") return lockActivePlan(conversationId);
   // Pass the raw message as the swap request so "swap thursday for something
   // vegetarian" honors the "vegetarian" part instead of picking at random.
-  if (intent === "swap" && day) return swapByDay(conversationId, day, text);
+  if (intent === "swap" && day) {
+    await swapByDay(conversationId, day, text);
+    return;
+  }
   // chat, ratings, or an under-specified swap -> conversational orchestrator
   // (which can itself swap/plan/exclude/expand/rate/adjust prefs).
   await runOrchestrator(conversationId);
