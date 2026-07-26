@@ -1,28 +1,33 @@
-// send_list — post the current plan's shopping list to each household chat on
-// demand, WITHOUT regenerating the week (non-destructive). Same shared-secret
-// gate as kickoff_week; triggered by trigger_send_list_now() or any caller with
-// the kickoff secret. Returns 200 immediately, does the sends in the background.
+// send_list — re-post the current plan to each household chat on demand,
+// WITHOUT regenerating the week (non-destructive; the dishes don't change).
+// Body {"mode":"plan"} sends the full recipe cards + shopping list; anything
+// else (default) sends just the shopping list. Same shared-secret gate as
+// kickoff_week; triggered by trigger_send_list_now() / trigger_send_plan_now().
+// Returns 200 immediately, does the sends in the background.
 
 import { dbClient } from "../_shared/db.ts";
-import { sendShoppingList } from "../_shared/planner.ts";
+import { sendCurrentPlan, sendShoppingList } from "../_shared/planner.ts";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
 
-Deno.serve((req: Request): Response => {
+Deno.serve(async (req: Request): Promise<Response> => {
   const secret = req.headers.get("x-kickoff-secret");
   if (!secret || secret !== Deno.env.get("KICKOFF_SECRET")) {
     return new Response("forbidden", { status: 403 });
   }
 
-  const work = runSendList().catch((e) => console.error("send_list failed", e));
+  const body = await req.json().catch(() => ({} as Record<string, unknown>));
+  const mode = (body as { mode?: string })?.mode === "plan" ? "plan" : "list";
+
+  const work = runSend(mode).catch((e) => console.error("send_list failed", e));
   if (typeof EdgeRuntime !== "undefined") EdgeRuntime.waitUntil(work);
 
-  return new Response(JSON.stringify({ ok: true }), {
+  return new Response(JSON.stringify({ ok: true, mode }), {
     headers: { "content-type": "application/json" },
   });
 });
 
-async function runSendList(): Promise<void> {
+async function runSend(mode: "plan" | "list"): Promise<void> {
   const db = dbClient();
   const { data: convos } = await db
     .from("conversations")
@@ -30,6 +35,7 @@ async function runSendList(): Promise<void> {
     .order("created_at", { ascending: true });
 
   for (const c of (convos ?? []) as { id: string }[]) {
-    await sendShoppingList(c.id);
+    if (mode === "plan") await sendCurrentPlan(c.id);
+    else await sendShoppingList(c.id);
   }
 }

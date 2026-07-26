@@ -667,6 +667,132 @@ export async function swapByDay(
   return await swapMeal(conversationId, match.id, undefined, request);
 }
 
+// Re-post the CURRENT plan — recipe cards + shopping list — without
+// regenerating the week (non-destructive; the dishes don't change). Used to
+// resend "the recipes and the list for this week", and to bring a chat that
+// missed the plan (e.g. the family group) up to date. Returns false if there's
+// no active plan.
+export async function sendCurrentPlan(conversationId: string): Promise<boolean> {
+  const db = dbClient();
+  const botToken = Deno.env.get("TELEGRAM_BOT_TOKEN")!;
+
+  const { data: convo } = await db
+    .from("conversations")
+    .select("id, household_id, telegram_chat_id, active_plan_id")
+    .eq("id", conversationId)
+    .maybeSingle();
+  if (!convo?.active_plan_id) {
+    await sendMessage(
+      botToken,
+      convo?.telegram_chat_id ?? 0,
+      "no plan yet — say “plan the week” and I'll put one together.",
+    );
+    return false;
+  }
+  const desc = describeHousehold(await getPreferences(db, convo.household_id));
+
+  const { data: plan } = await db
+    .from("meal_plans")
+    .select("week_of, status")
+    .eq("id", convo.active_plan_id)
+    .maybeSingle();
+
+  const { data: items } = await db
+    .from("meal_plan_items")
+    .select("id, day, recipe_id")
+    .eq("plan_id", convo.active_plan_id)
+    .order("day", { ascending: true });
+  const rows = (items ?? []) as { id: string; day: string; recipe_id: string }[];
+  if (rows.length === 0) {
+    await sendMessage(botToken, convo.telegram_chat_id, "this week's plan is empty.");
+    return false;
+  }
+
+  const recipeIds = rows.map((r) => r.recipe_id);
+  const { data: recData } = await db
+    .from("recipes")
+    .select("id, title, cuisine_tag, time_minutes, body_md, toddler_variant_notes")
+    .in("id", recipeIds);
+  const recById = new Map(
+    ((recData ?? []) as RecipeFull[]).map((r) => [r.id, r]),
+  );
+
+  // Ingredient names (for the egg note) + avg rating (for the stars) per recipe.
+  const { data: riData } = await db
+    .from("recipe_ingredients")
+    .select("recipe_id, ingredients(name_canonical)")
+    .in("recipe_id", recipeIds);
+  const ingsByRecipe = new Map<string, string[]>();
+  for (const r of (riData ?? []) as Record<string, unknown>[]) {
+    const ing = Array.isArray(r.ingredients) ? r.ingredients[0] : r.ingredients;
+    const name = (ing as { name_canonical?: string })?.name_canonical;
+    if (!name) continue;
+    const key = r.recipe_id as string;
+    (ingsByRecipe.get(key) ?? ingsByRecipe.set(key, []).get(key)!).push(name);
+  }
+  const { data: rateData } = await db
+    .from("recipe_ratings")
+    .select("recipe_id, rating")
+    .in("recipe_id", recipeIds);
+  const rateAgg = new Map<string, { sum: number; n: number }>();
+  for (const r of (rateData ?? []) as { recipe_id: string; rating: number }[]) {
+    const a = rateAgg.get(r.recipe_id) ?? { sum: 0, n: 0 };
+    a.sum += r.rating;
+    a.n += 1;
+    rateAgg.set(r.recipe_id, a);
+  }
+
+  const post = async (text: string, markup?: InlineKeyboard) => {
+    await db.from("messages").insert({
+      conversation_id: convo.id,
+      direction: "out",
+      text,
+    });
+    return await sendMessage(botToken, convo.telegram_chat_id, text, "HTML", markup);
+  };
+
+  const firstDay = rows[0].day;
+  const lastDay = rows[rows.length - 1].day;
+  const babyLine = desc.hasBaby
+    ? `\n🍼 <i>Baby: pull a plain, soft, unsalted spoonful before salt/spice/acid — no honey.</i>`
+    : "";
+  await post(
+    `🗒️ <b>Your week · ${esc(fmt(firstDay))}–${esc(fmt(lastDay))}</b>\n` +
+      `${rows.length} dinner${rows.length > 1 ? "s" : ""} below, then the shopping list. Tap 🔄 to swap or 📖 for the full recipe.${babyLine}`,
+  );
+
+  for (const row of rows) {
+    const full = recById.get(row.recipe_id);
+    if (!full) continue;
+    const agg = rateAgg.get(row.recipe_id);
+    const cand: Candidate = {
+      id: full.id,
+      title: full.title,
+      cuisine_tag: full.cuisine_tag,
+      time_minutes: full.time_minutes,
+      description: (full.body_md ?? "").split("\n")[0],
+      toddler_variant_notes: full.toddler_variant_notes,
+      ingredients: ingsByRecipe.get(row.recipe_id) ?? [],
+      avg_rating: agg ? Math.round((agg.sum / agg.n) * 10) / 10 : null,
+      rating_count: agg?.n ?? 0,
+    };
+    await post(
+      renderCard({ day: dateToDayKey(row.day), cand, why: "" }, full, desc),
+      cardButtons(row.id, row.recipe_id),
+    );
+  }
+
+  const { data: listRows } = await db.rpc("generate_shopping_list", {
+    p_plan_id: convo.active_plan_id,
+  });
+  await post(renderShoppingList(plan?.week_of ?? firstDay, (listRows ?? []) as ShoppingRow[]));
+
+  if (plan?.status !== "locked") {
+    await post("Looks right? Lock it in for the week 👇", lockButton(convo.active_plan_id));
+  }
+  return true;
+}
+
 // "send me the grocery list" — (re)build the current plan's shopping list and
 // post it as a fresh message. The list is always live-generated from the plan's
 // items, so this reflects any swaps. Returns false if there's no active plan.
