@@ -196,6 +196,9 @@ export async function proposePlan(conversationId: string): Promise<void> {
       position: idx,
     })),
   );
+  await db.rpc("mark_recipes_used", {
+    p_updates: chosen.map((c) => ({ id: c.cand.id, day: dayDate(weekOf, c.day) })),
+  });
 
   // Fetch full recipe bodies (instructions) for the chosen dishes.
   const chosenIds = chosen.map((c) => c.cand.id);
@@ -385,6 +388,9 @@ export async function swapMeal(
   }
 
   await db.from("meal_plan_items").update({ recipe_id: cand.id }).eq("id", item.id);
+  await db.rpc("mark_recipes_used", {
+    p_updates: [{ id: cand.id, day: item.day }],
+  });
 
   const { data: full } = await db
     .from("recipes")

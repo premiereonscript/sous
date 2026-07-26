@@ -38,9 +38,32 @@ async function runKickoff(): Promise<void> {
 
   const { data: convos } = await db
     .from("conversations")
-    .select("id, telegram_chat_id");
+    .select("id, household_id, telegram_chat_id")
+    .order("created_at", { ascending: true });
 
-  for (const c of (convos ?? []) as { id: string; telegram_chat_id: number }[]) {
+  // A household can have more than one Telegram chat attached (e.g. a DM and
+  // a group chat) — proposePlan upserts ONE meal_plan per (household_id,
+  // week_of), so running it again for the same household mid-loop deletes
+  // and replaces the first chat's picks: that chat is left with recipe
+  // cards, a shopping list, and Swap/Lock buttons pointing at meal_plan_items
+  // that no longer exist. Until every attached chat gets the plan fanned out
+  // (not just the one that runs first), only kick off once per household.
+  const seenHouseholds = new Set<string>();
+  for (
+    const c of (convos ?? []) as {
+      id: string;
+      household_id: string;
+      telegram_chat_id: number;
+    }[]
+  ) {
+    if (seenHouseholds.has(c.household_id)) {
+      console.warn(
+        `kickoff: skipping conversation ${c.id} — household ${c.household_id} already kicked off this run`,
+      );
+      continue;
+    }
+    seenHouseholds.add(c.household_id);
+
     await db.from("messages").insert({
       conversation_id: c.id,
       direction: "out",
