@@ -835,6 +835,330 @@ export async function sendShoppingList(conversationId: string): Promise<boolean>
   return true;
 }
 
+// ---- customize one dish (change an ingredient, keep the dish) ---------------
+// "add meat to the pesto pasta", "swap the cream for coconut milk". Instead of
+// swapping the whole dish away, we fork a one-off VARIANT recipe with the change
+// applied — rewritten method + adjusted ingredients — and repoint just this
+// day's plan item to it, so the card AND the grocery list update while the meal
+// stays. Returns the new title (or null if it couldn't).
+const CUSTOMIZE_TOOL = {
+  name: "apply_customization",
+  description:
+    "Apply the requested change to a single recipe: give the updated title, one-line description, full numbered method, and the exact ingredient changes (adds/removes) with real quantities so the shopping list stays correct.",
+  input_schema: {
+    type: "object",
+    properties: {
+      new_title: {
+        type: "string",
+        description: "updated dish name reflecting the change, e.g. 'Pesto Pasta with Italian Sausage'",
+      },
+      new_description: {
+        type: "string",
+        description: "one-line description of the dish for the card",
+      },
+      new_steps: {
+        type: "array",
+        items: { type: "string" },
+        description: "the full method as ordered steps (no leading numbers), incorporating the change",
+      },
+      ingredient_changes: {
+        type: "array",
+        description: "only the ingredients that actually change",
+        items: {
+          type: "object",
+          properties: {
+            action: { type: "string", enum: ["add", "remove"] },
+            name: { type: "string", description: "concrete ingredient, e.g. 'Italian sausage' — never vague like 'meat'" },
+            quantity: { type: "number", description: "for add: amount, sized for this household" },
+            unit: { type: "string", description: "for add: unit, e.g. 'lb', 'oz', 'each', 'can'" },
+            source_hint: {
+              type: "string",
+              enum: ["farmers_market", "grocery", "either"],
+              description: "for add: where it's bought",
+            },
+          },
+          required: ["action", "name"],
+        },
+      },
+    },
+    required: ["new_title", "new_description", "new_steps", "ingredient_changes"],
+  },
+};
+
+interface IngredientChange {
+  action: "add" | "remove";
+  name: string;
+  quantity?: number;
+  unit?: string;
+  source_hint?: string;
+}
+
+export async function customizeMeal(
+  conversationId: string,
+  dayKey: DayKey,
+  change: string,
+): Promise<string | null> {
+  const db = dbClient();
+  const botToken = Deno.env.get("TELEGRAM_BOT_TOKEN")!;
+
+  const { data: convo } = await db
+    .from("conversations")
+    .select("id, household_id, telegram_chat_id, active_plan_id, state_payload")
+    .eq("id", conversationId)
+    .maybeSingle();
+  if (!convo?.active_plan_id) {
+    await sendMessage(
+      botToken,
+      convo?.telegram_chat_id ?? 0,
+      "no plan to tweak yet — say “plan the week” first.",
+    );
+    return null;
+  }
+  const desc = describeHousehold(await getPreferences(db, convo.household_id));
+
+  // The plan item for that day + its current recipe.
+  const { data: items } = await db
+    .from("meal_plan_items")
+    .select("id, day, recipe_id")
+    .eq("plan_id", convo.active_plan_id);
+  const item = (items ?? []).find(
+    (i: { id: string; day: string }) => dateToDayKey(i.day) === dayKey,
+  ) as { id: string; day: string; recipe_id: string } | undefined;
+  if (!item) {
+    await sendMessage(
+      botToken,
+      convo.telegram_chat_id,
+      `i don't see a ${DAY_LABEL[dayKey]} dinner to tweak.`,
+    );
+    return null;
+  }
+
+  const { data: recipe } = await db
+    .from("recipes")
+    .select("id, title, cuisine_tag, time_minutes, body_md, toddler_variant_notes")
+    .eq("id", item.recipe_id)
+    .maybeSingle();
+  if (!recipe) return null;
+
+  const { data: curIng } = await db
+    .from("recipe_ingredients")
+    .select("ingredient_id, quantity, unit, optional, ingredients(name_canonical)")
+    .eq("recipe_id", item.recipe_id);
+  const curRows = (curIng ?? []) as Record<string, unknown>[];
+  const curList = curRows
+    .map((r) => {
+      const ing = Array.isArray(r.ingredients) ? r.ingredients[0] : r.ingredients;
+      const name = (ing as { name_canonical?: string })?.name_canonical ?? "";
+      const qty = r.quantity != null ? `${trimNum(r.quantity as number)} ${r.unit ?? ""}`.trim() : "";
+      return `${qty ? `${qty} ` : ""}${name}`.trim();
+    })
+    .filter(Boolean)
+    .join("\n");
+
+  const [intro] = (recipe.body_md ?? "").split("\n\n");
+  const { toolUses } = await completeRaw({
+    apiKey: Deno.env.get("ANTHROPIC_API_KEY")!,
+    model: PLANNER_MODEL,
+    system:
+      `You customize a single recipe on request while keeping it the SAME dish (not a different recipe). Apply the change faithfully, rewrite the method so it uses/omits the changed ingredient, and report the ingredient delta with concrete names + real quantities sized for the household so the shopping list stays correct. Never output a vague ingredient like "meat" or "protein" — pick a specific one (Italian sausage, ground beef, chicken thighs). Respect the household's kids/baby (soft/unsalted portion pulled before spice; no honey under 1). Then call apply_customization.
+
+${desc.context}`,
+    messages: [{
+      role: "user",
+      content:
+        `Dish: ${recipe.title} (${CUISINE_LABEL[recipe.cuisine_tag] ?? recipe.cuisine_tag}, ~${recipe.time_minutes} min)\n` +
+        `Description: ${intro.trim()}\n` +
+        `Current ingredients:\n${curList}\n\n` +
+        `Requested change: "${change}"\n\nApply it and call apply_customization.`,
+    }],
+    tools: [CUSTOMIZE_TOOL],
+    toolChoice: { type: "tool", name: "apply_customization" },
+    maxTokens: 1500,
+  });
+
+  const call = toolUses.find((t) => t.name === "apply_customization");
+  if (!call) {
+    await sendMessage(
+      botToken,
+      convo.telegram_chat_id,
+      "couldn't work that change out — tell me the specific ingredient to add or swap?",
+    );
+    return null;
+  }
+  const newTitle = String(call.input?.new_title ?? recipe.title).trim();
+  const newDesc = String(call.input?.new_description ?? intro).trim();
+  const steps = Array.isArray(call.input?.new_steps)
+    ? (call.input!.new_steps as unknown[]).map((s) => String(s).trim()).filter(Boolean)
+    : [];
+  const changes = Array.isArray(call.input?.ingredient_changes)
+    ? (call.input!.ingredient_changes as IngredientChange[])
+    : [];
+
+  // body_md = description, blank line, numbered steps (the card's format).
+  const numbered = steps.map((s, i) => `${i + 1}. ${s.replace(/^\d+\.\s*/, "")}`).join("\n");
+  const newBody = `${newDesc}\n\n${numbered}`;
+
+  // Fork the variant recipe.
+  const { data: variant } = await db
+    .from("recipes")
+    .insert({
+      title: newTitle,
+      cuisine_tag: recipe.cuisine_tag,
+      body_md: newBody,
+      time_minutes: recipe.time_minutes,
+      toddler_variant_notes: recipe.toddler_variant_notes,
+      source: "llm_generated",
+      is_variant: true,
+      parent_recipe_id: recipe.id,
+    })
+    .select("id")
+    .single();
+  if (!variant) {
+    console.error("customize: variant insert failed");
+    return null;
+  }
+
+  // Copy the original ingredients onto the variant, then apply the delta.
+  if (curRows.length) {
+    await db.from("recipe_ingredients").insert(
+      curRows.map((r) => ({
+        recipe_id: variant.id,
+        ingredient_id: r.ingredient_id as string,
+        quantity: r.quantity as number | null,
+        unit: r.unit as string | null,
+        optional: Boolean(r.optional),
+      })),
+    );
+  }
+  for (const ch of changes) {
+    const name = String(ch.name ?? "").trim();
+    if (!name) continue;
+    if (ch.action === "remove") {
+      const ingId = await resolveIngredient(db, name);
+      if (ingId) {
+        await db.from("recipe_ingredients")
+          .delete()
+          .eq("recipe_id", variant.id)
+          .eq("ingredient_id", ingId);
+      }
+    } else {
+      const ingId = await resolveOrCreateIngredient(db, name, ch.unit, ch.source_hint);
+      if (ingId) {
+        await db.from("recipe_ingredients").upsert(
+          {
+            recipe_id: variant.id,
+            ingredient_id: ingId,
+            quantity: typeof ch.quantity === "number" ? ch.quantity : 1,
+            unit: ch.unit ?? "each",
+            optional: false,
+          },
+          { onConflict: "recipe_id,ingredient_id" },
+        );
+      }
+    }
+  }
+
+  // Repoint this day's plan item to the variant and mark it used.
+  await db.from("meal_plan_items").update({ recipe_id: variant.id }).eq("id", item.id);
+  await db.rpc("mark_recipes_used", { p_updates: [{ id: variant.id, day: item.day }] });
+
+  // Re-post the card for that day.
+  const { data: full } = await db
+    .from("recipes")
+    .select("id, title, cuisine_tag, time_minutes, body_md, toddler_variant_notes")
+    .eq("id", variant.id)
+    .maybeSingle();
+  const cand: Candidate = {
+    id: variant.id,
+    title: newTitle,
+    cuisine_tag: recipe.cuisine_tag,
+    time_minutes: recipe.time_minutes,
+    description: newDesc,
+    toddler_variant_notes: recipe.toddler_variant_notes,
+    ingredients: [],
+    avg_rating: null,
+    rating_count: 0,
+  };
+  const cardText = renderCard(
+    { day: dayKey, cand, why: `customized: ${change}` },
+    full as RecipeFull | undefined,
+    desc,
+  );
+  await db.from("messages").insert({
+    conversation_id: convo.id,
+    direction: "out",
+    text: `🔧 Updated ${DAY_LABEL[dayKey]}:\n\n${cardText}`,
+  });
+  await sendMessage(
+    botToken,
+    convo.telegram_chat_id,
+    `🔧 Updated ${DAY_LABEL[dayKey]}:\n\n${cardText}`,
+    "HTML",
+    cardButtons(item.id, variant.id),
+  );
+
+  // Keep the shopping list current (edit the in-place message if we have it).
+  const { data: listRows } = await db.rpc("generate_shopping_list", {
+    p_plan_id: convo.active_plan_id,
+  });
+  const listMsgId = (convo.state_payload as { shopping_msg_id?: number })?.shopping_msg_id;
+  const { data: plan } = await db
+    .from("meal_plans")
+    .select("week_of")
+    .eq("id", convo.active_plan_id)
+    .maybeSingle();
+  if (listMsgId && plan) {
+    await editMessageText(
+      botToken,
+      convo.telegram_chat_id,
+      listMsgId,
+      renderShoppingList(plan.week_of, (listRows ?? []) as ShoppingRow[]),
+      "HTML",
+    );
+  }
+
+  return newTitle;
+}
+
+// Find an existing ingredient by fuzzy name; null if none.
+async function resolveIngredient(
+  db: ReturnType<typeof dbClient>,
+  name: string,
+): Promise<string | null> {
+  const { data } = await db
+    .from("ingredients")
+    .select("id")
+    .ilike("name_canonical", `%${name.trim()}%`)
+    .limit(1)
+    .maybeSingle();
+  return data?.id ?? null;
+}
+
+// Find an ingredient by name, or create it so the shopping list can route it.
+async function resolveOrCreateIngredient(
+  db: ReturnType<typeof dbClient>,
+  name: string,
+  unit?: string,
+  sourceHint?: string,
+): Promise<string | null> {
+  const existing = await resolveIngredient(db, name);
+  if (existing) return existing;
+  const src = ["farmers_market", "grocery", "either"].includes(sourceHint ?? "")
+    ? sourceHint
+    : "grocery";
+  const { data } = await db
+    .from("ingredients")
+    .insert({
+      name_canonical: name.trim().toLowerCase(),
+      unit_default: unit ?? null,
+      source_hint: src,
+      is_free: false,
+    })
+    .select("id")
+    .single();
+  return data?.id ?? null;
+}
+
 // ---- expand one dish into a full, detailed recipe (callback `r:<recipe_id>`) --
 // The terse card is deliberately short; this is the "give me the real recipe"
 // view. Ingredient quantities come straight from the DB (never invented); the

@@ -19,6 +19,7 @@ import {
   updatePreferences,
 } from "./household.ts";
 import {
+  customizeMeal,
   DAY_KEYS,
   type DayKey,
   expandRecipe,
@@ -121,6 +122,19 @@ const TOOLS = [
     },
   },
   {
+    name: "customize_meal",
+    description:
+      "Tweak ONE ingredient of a day's dinner while KEEPING the dish (don't swap it away). Use for 'add sausage to the pesto pasta', 'swap the cream for coconut milk', 'make thursday gluten-free', 'leave the cilantro off'. Rewrites the recipe + updates the grocery list. Put the user's change verbatim in `change`. (For a whole different dish, use swap_meal instead.)",
+    input_schema: {
+      type: "object",
+      properties: {
+        day: { type: "string", enum: [...DAY_KEYS], description: "which day's dinner to tweak" },
+        change: { type: "string", description: "the requested change in the user's words" },
+      },
+      required: ["day", "change"],
+    },
+  },
+  {
     name: "expand_recipe",
     description:
       "Send the full, detailed recipe for a dish — real ingredient quantities, step-by-step method, chef's tips. Use for 'full recipe for X', 'how do I make X', 'more detail on thursday'.",
@@ -143,7 +157,7 @@ const AGENT_INSTRUCTION =
 
 Key rules:
 - If they ask for the grocery/shopping list in ANY form, call send_shopping_list. NEVER say you can't send it and NEVER tell them to scroll up — the list is always available.
-- You work from a fixed set of recipes, so you can't edit a single recipe's ingredients (e.g. literally "add sausage to THIS pesto pasta"). If they want a change like that, the right move is swap_meal to a dish that already fits ("something with meat", "a meaty pasta") and then say plainly what you swapped in — don't pretend you edited the original, and don't ask them for a title you can look up yourself.
+- Ingredient tweak vs. whole new dish: if they want to change ONE thing but keep the dish ("add sausage to the pesto pasta", "swap cream for coconut milk", "leave off the cilantro", "make it gluten-free"), use customize_meal — it rewrites that recipe and updates the grocery list. Only use swap_meal when they want a genuinely different dinner. Don't ask for a dish title you can look up yourself.
 - You can see the current week and recent history below — use them to answer honestly (e.g. how often a dish has come up); never guess or wave it away.`;
 
 export async function runOrchestrator(conversationId: string): Promise<string> {
@@ -265,6 +279,16 @@ async function runTool(
         return ok
           ? "posted the up-to-date shopping list to the chat"
           : "no active plan to build a list from";
+      }
+      case "customize_meal": {
+        const day = asDay(input.day);
+        if (!day) return "need a valid weekday to customize";
+        const change = String(input.change ?? "").trim();
+        if (!change) return "need to know what change to make";
+        const newTitle = await customizeMeal(convo.id, day, change);
+        return newTitle
+          ? `updated ${day} to "${newTitle}" — its card was reposted and the grocery list refreshed`
+          : `couldn't apply that change to ${day}; tell the user plainly`;
       }
       case "plan_week":
         await proposePlan(convo.id);
