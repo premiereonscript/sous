@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # Type-check + unit-test the Deno edge functions.
+  deno:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Type-check edge functions
+        run: deno task check
+      - name: Unit tests
+        run: deno task test
+
+  # Apply every migration to a real local Supabase stack and run the pgTAP
+  # database tests. This is what validates the SQL (portion scaling, per-household
+  # free staples, dietary filter) that can't be unit-tested without Postgres.
+  database:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Start Supabase (applies all migrations + seeds)
+        run: supabase db start
+      - name: Run pgTAP tests
+        run: supabase test db

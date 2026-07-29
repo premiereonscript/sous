@@ -1,0 +1,14 @@
+{
+  "tasks": {
+    "check": "deno check supabase/functions/tg_webhook/index.ts supabase/functions/orchestrator/index.ts supabase/functions/kickoff_week/index.ts supabase/functions/send_list/index.ts",
+    "test": "deno test supabase/functions/",
+    "fmt": "deno fmt supabase/functions/",
+    "lint": "deno lint supabase/functions/"
+  },
+  "fmt": {
+    "exclude": ["supabase/.temp", "supabase/.branches"]
+  },
+  "lint": {
+    "exclude": ["supabase/.temp", "supabase/.branches"]
+  }
+}
