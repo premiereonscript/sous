@@ -1,4 +1,4 @@
--- Goodbye Fresh — recipe schema (subset of SPEC §9.2)
+-- Sous — recipe schema (subset of SPEC §9.2)
 -- The three tables the curated seed (supabase/seeds/recipes.sql) depends on.
 -- The remaining household/plan/conversation tables come in a later migration.
 

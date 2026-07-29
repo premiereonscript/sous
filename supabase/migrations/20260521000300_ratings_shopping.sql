@@ -1,4 +1,4 @@
--- Goodbye Fresh — recipe ratings + shopping-list generation.
+-- Sous — recipe ratings + shopping-list generation.
 --
 -- recipe_ratings: per-recipe 1-5 preference (5 = best), one row per (recipe,
 -- rater). Distinct from the per-meal `feedback` table (weekly recap tags) —

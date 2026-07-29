@@ -1,4 +1,4 @@
--- Goodbye Fresh — seed recipes (Day 3–4 of the build order, SPEC §11/§17)
+-- Sous — seed recipes (Day 3–4 of the build order, SPEC §11/§17)
 -- 25 curated dinners: 8 Mexican, 8 Asian, 8 Italian, 1 wildcard ("other").
 --
 -- Design notes:

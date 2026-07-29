@@ -1,4 +1,4 @@
-# Edge Functions — Goodbye Fresh
+# Edge Functions — Sous
 
 Developer reference for the three functions. For deploying your own instance,
 see the repo root [`SETUP.md`](../../SETUP.md).

@@ -1,4 +1,4 @@
--- Goodbye Fresh — core schema (remainder of SPEC §9.2 + ops tables)
+-- Sous — core schema (remainder of SPEC §9.2 + ops tables)
 -- Adds the household / planning / conversation tables on top of the recipe
 -- catalog from 20260521000000_recipes_schema.sql.
 --

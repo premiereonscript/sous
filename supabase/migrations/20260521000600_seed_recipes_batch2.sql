@@ -1,4 +1,4 @@
--- Goodbye Fresh — seed recipes, batch 2 (recipes 26–50).
+-- Sous — seed recipes, batch 2 (recipes 26–50).
 -- Brings the catalog to 50: +8 Mexican, +8 Asian, +8 Italian, +1 wildcard.
 -- Same idempotent pattern as recipes.sql. Reuses the ingredient catalog and
 -- adds the new ingredients these dishes need. Units are kept consistent with

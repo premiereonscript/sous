@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Goodbye Fresh — guided setup. Deploys your own private instance.
+# Sous — guided setup. Deploys your own private instance.
 # See SETUP.md for what each step does and the manual fallback.
 set -euo pipefail
 
@@ -16,7 +16,7 @@ command -v supabase >/dev/null || {
 supabase projects list >/dev/null 2>&1 || {
   echo "Not logged in. Run: supabase login"; exit 1; }
 
-say "Goodbye Fresh setup"
+say "Sous setup"
 echo "Have ready: Supabase project ref + DB password, Telegram bot token (BotFather),"
 echo "and an Anthropic API key. (Create the Supabase project + bot first — see SETUP.md.)"
 
@@ -46,6 +46,7 @@ say "Deploying functions (no Docker; --use-api)"
 supabase functions deploy tg_webhook   --no-verify-jwt --use-api
 supabase functions deploy orchestrator                 --use-api
 supabase functions deploy kickoff_week --no-verify-jwt --use-api
+supabase functions deploy send_list    --no-verify-jwt --use-api
 
 say "Finding your Telegram chat id"
 echo "Open your bot in Telegram, tap Start, and send it any message."

@@ -1,4 +1,4 @@
-// Environment for the Goodbye Fresh Edge Functions.
+// Environment for the Sous Edge Functions.
 // Secrets are set via `supabase secrets set ...` (SPEC §9.7) — never committed.
 
 export interface Env {

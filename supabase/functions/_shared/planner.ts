@@ -541,7 +541,7 @@ function swapSystem(
   const askBlock = req
     ? `\nThe household specifically asked for: "${req}". Treat this as the TOP priority — pick the candidate that best matches it (use the cuisine/time/ingredients to judge fit). If nothing matches well, pick the closest and you'll note the tradeoff in "why".\n`
     : "";
-  return `You are adjusting one dinner in an existing week for Goodbye Fresh. Replace ${DAY_LABEL[dayKey]}'s dinner.
+  return `You are adjusting one dinner in an existing week for Sous. Replace ${DAY_LABEL[dayKey]}'s dinner.
 
 Current week:
 ${week}

@@ -1,4 +1,4 @@
-// tg_webhook — Telegram webhook for Goodbye Fresh (SPEC §9.3 messaging adapter).
+// tg_webhook — Telegram webhook for Sous (SPEC §9.3 messaging adapter).
 //
 // Verify the webhook secret + chat allowlist, persist the inbound message
 // (dedup on telegram_update_id, SPEC §9.6), then hand off to the orchestrator

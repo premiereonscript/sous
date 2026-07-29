@@ -1,4 +1,4 @@
--- Goodbye Fresh — Friday kickoff cron (SPEC §9.5).
+-- Sous — Friday kickoff cron (SPEC §9.5).
 -- pg_cron + pg_net call the kickoff_week Edge Function. The function URL and
 -- shared secret are read from Supabase Vault at run time, so no secret lives in
 -- this committed migration. Insert them out-of-band (see deploy notes):

@@ -1,4 +1,4 @@
-# Goodbye Fresh — Product Spec
+# Sous — Product Spec
 
 A personal Telegram-bot meal planner that replaces HelloFresh for one family.
 Friday evening, the bot opens a thread, gathers feedback on last week,

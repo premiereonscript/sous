@@ -1,6 +1,6 @@
 # Setup
 
-How to deploy your own Goodbye Fresh instance. Written to be followed by a
+How to deploy your own Sous instance. Written to be followed by a
 person **or** executed by an agent (e.g. Claude Code). Most of it is automated
 by [`setup.sh`](./setup.sh); the steps below are the source of truth and the
 manual fallback.
@@ -101,7 +101,10 @@ Keep `WEBHOOK_SECRET` and `KICKOFF_SECRET` handy for the next steps.
 supabase functions deploy tg_webhook   --no-verify-jwt --use-api
 supabase functions deploy orchestrator                 --use-api
 supabase functions deploy kickoff_week --no-verify-jwt --use-api
+supabase functions deploy send_list    --no-verify-jwt --use-api
 ```
+(`send_list` powers on-demand *"send me the shopping list"* / *"resend the plan"*
+and the manual helpers below — deploy all four.)
 
 ### 8. Capture your Telegram chat id and allow it
 The bot only responds to allow-listed ids. Easiest way to find yours:
@@ -130,13 +133,25 @@ curl "https://api.telegram.org/bot<BOT_TOKEN>/setWebhook" \
 
 ## Verify
 
-Message your bot:
+Message your bot (everything below is just chat — no commands or slashes):
 - **"hi"** → first run kicks off **onboarding**: it asks how many people +
   kids' ages, dinners per week, monthly budget, and cuisines, then saves them.
 - **"plan my week"** → proposes that many dinners with Swap/Lock buttons + a
   shopping list, tuned to your answers.
-- **"the carnitas were a 5"** → it logs a rating and reacts.
-- Tap **🔄 Swap** / **✅ Lock** on the cards.
+- Tap **🔄 Swap** / **✅ Lock** on the cards, or just text it:
+  - **"swap thursday for something vegetarian"** → a request-aware swap that
+    honors what you asked and keeps the week valid.
+  - **"add sausage to the pesto pasta"** / **"make thursday gluten-free"** →
+    **customizes** that one dish (keeps the dinner, rewrites the recipe, updates
+    the grocery list) instead of swapping it out.
+  - **"never make salmon cakes again"** → **permanently excludes** a dish
+    (stronger than a bad rating) and offers to swap it off the current week.
+  - **"the carnitas were a 5"** → logs a **rating**; future plans favor hits.
+  - **"send me the grocery list"** → re-posts the current, up-to-date shopping
+    list any time (via the `send_list` function).
+  - **"show me the full teriyaki salmon recipe"** → expands a full recipe card.
+  - **"we're actually 3 adults now"** / **"bump the budget to $1,300"** →
+    updates your **household preferences** conversationally.
 
 Check delivery health if nothing happens:
 ```bash
@@ -162,6 +177,22 @@ select vault.create_secret('<KICKOFF_SECRET>', 'kickoff_secret')
 The schedule is `0 1 * * 6` UTC ≈ **Friday 6pm Pacific (PDT)**. Edit
 `supabase/migrations/20260521000400_kickoff_cron.sql` (and re-`cron.schedule`)
 for your timezone.
+
+## Manual / off-cycle helpers
+
+The migrations install a few `SECURITY DEFINER` SQL functions you can call from
+the Supabase **SQL Editor** to drive the bot without waiting for Friday's cron
+or texting it. Each reads the function URL + shared secret from Vault, so no
+secret is ever exposed:
+
+| Call | What it does |
+|---|---|
+| `select trigger_kickoff_now();` | Runs the Friday kickoff **now** — proposes a fresh week. |
+| `select trigger_send_plan_now();` | Re-posts the **current** plan (cards + list) without regenerating it. |
+| `select trigger_send_list_now();` | Re-posts just the **shopping list**. |
+| `select * from net_last_responses();` | Debug: last outbound HTTP calls (status + body) — handy if a send didn't arrive. |
+
+These are optional conveniences; the bot works fully through chat without them.
 
 ## Optional: group chats
 

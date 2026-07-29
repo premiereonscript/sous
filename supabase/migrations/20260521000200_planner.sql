@@ -1,4 +1,4 @@
--- Goodbye Fresh — planner candidate selection (SPEC §9.4 rotation query).
+-- Sous — planner candidate selection (SPEC §9.4 rotation query).
 -- Returns rotation-eligible recipes (not used in the last `p_window_days`),
 -- each with its short description and the set of ingredient names so the model
 -- can reason about cuisine spread and ingredient overlap (cost).
