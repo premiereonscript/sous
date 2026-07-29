@@ -62,6 +62,22 @@ Deno.test("weekly budget is derived from the monthly figure", () => {
   assertEquals(none.weeklyBudget, null);
 });
 
+Deno.test("no dietary rules => no dietary line in context", () => {
+  const d = describeHousehold(prefs());
+  assert(!d.context.includes("Dietary rules"));
+});
+
+Deno.test("dietary restrictions + excluded ingredients render as HARD rules", () => {
+  const d = describeHousehold(prefs({
+    dietary_restrictions: ["vegetarian", "no_nuts"],
+    excluded_ingredients: ["cilantro"],
+  }));
+  assertStringIncludes(d.context, "Dietary rules (HARD");
+  assertStringIncludes(d.context, "vegetarian");
+  assertStringIncludes(d.context, "no_nuts");
+  assertStringIncludes(d.context, "cilantro");
+});
+
 Deno.test("cuisines are listed when present, omitted when empty", () => {
   assertStringIncludes(
     describeHousehold(prefs({ cuisines: ["korean", "mexican"] })).context,

@@ -97,7 +97,7 @@ const TOOLS = [
   {
     name: "update_preferences",
     description:
-      "Change the household's standing preferences (they persist and shape every future plan). Use for 'we like Thai now', 'bump us to 4 dinners a week', 'budget is $900/month', 'the baby is 11 months now'. Only include the fields that changed.",
+      "Change the household's standing preferences (they persist and shape every future plan). Use for 'we like Thai now', 'bump us to 4 dinners a week', 'budget is $900/month', 'the baby is 11 months now', 'we went vegetarian', 'stop using peanuts — allergy', 'we have chickens now, skip eggs'. Only include the fields that changed; array fields are FULL replacements.",
     input_schema: {
       type: "object",
       properties: {
@@ -117,6 +117,31 @@ const TOOLS = [
           type: "array",
           items: { type: "string" },
           description: "FULL replacement list of preferred cuisines",
+        },
+        dietary_restrictions: {
+          type: "array",
+          description:
+            "FULL replacement list of canonical diet keys (hard-enforced). Allowed: vegetarian, vegan, pescatarian, gluten_free, dairy_free, halal, kosher, no_pork, no_beef, no_poultry, no_shellfish, no_fish, no_nuts, no_soy, no_egg",
+          items: {
+            type: "string",
+            enum: [
+              "vegetarian", "vegan", "pescatarian", "gluten_free", "dairy_free",
+              "halal", "kosher", "no_pork", "no_beef", "no_poultry",
+              "no_shellfish", "no_fish", "no_nuts", "no_soy", "no_egg",
+            ],
+          },
+        },
+        excluded_ingredients: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "FULL replacement list of specific ingredient names / allergen words to always avoid",
+        },
+        free_staples: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "FULL replacement list of ingredients the household already has (kept off the shopping list), e.g. 'eggs' if they keep chickens",
         },
       },
     },
@@ -447,6 +472,11 @@ async function applyPreferenceUpdate(
     patch.kids = (input.kids as { age_months?: unknown }[])
       .map((k) => ({ age_months: Math.max(0, Math.min(215, Math.round(Number(k?.age_months) || 0))) }))
       .filter((k) => Number.isFinite(k.age_months)) as Kid[];
+  }
+  for (const field of ["dietary_restrictions", "excluded_ingredients", "free_staples"] as const) {
+    if (Array.isArray(input[field])) {
+      patch[field] = (input[field] as unknown[]).map((c) => String(c)).filter(Boolean);
+    }
   }
   if (Object.keys(patch).length === 0) return "nothing to update";
 

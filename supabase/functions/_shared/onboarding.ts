@@ -17,13 +17,14 @@ RIGHT NOW you're setting up a brand-new household — you don't know them yet, a
 3. How many dinners they want planned per week (1–7; most pick 5).
 4. Their monthly grocery budget (a dollar amount).
 5. What cuisines / kinds of food they love.
+6. Any dietary restrictions or allergies for ANYONE in the household — this one matters, ask it plainly (e.g. "anyone vegetarian, allergies, foods you avoid?"). Map their answer to save_setup's dietary_restrictions using ONLY these keys: vegetarian, vegan, pescatarian, gluten_free, dairy_free, halal, kosher, no_pork, no_beef, no_poultry, no_shellfish, no_fish, no_nuts, no_soy, no_egg. For a specific ingredient they avoid that isn't one of those keys (a named allergy or hard dislike), put the ingredient name in excluded_ingredients. If they have none, pass empty arrays — but you must still ask.
 
-Open with a short, warm Sous-style hello + your first question or two. As soon as you have ALL FIVE, call save_setup with structured values (convert kid ages to months). Do NOT call it early or guess — ask. After it's saved, you'll be told; then hype them up and tell them to say "plan my week" when ready.`;
+Open with a short, warm Sous-style hello + your first question or two. As soon as you have ALL SIX, call save_setup with structured values (convert kid ages to months). Do NOT call it early or guess — ask, especially about allergies. After it's saved, you'll be told; then hype them up and tell them to say "plan my week" when ready.`;
 
 const SAVE_SETUP_TOOL = {
   name: "save_setup",
   description:
-    "Save the household's setup. Only call once you have ALL of: number of adults, every kid's age, dinners per week, monthly grocery budget, and preferred cuisines.",
+    "Save the household's setup. Only call once you have ALL of: number of adults, every kid's age, dinners per week, monthly grocery budget, preferred cuisines, and dietary restrictions/allergies (ask even if the answer is none).",
   input_schema: {
     type: "object",
     properties: {
@@ -40,8 +41,30 @@ const SAVE_SETUP_TOOL = {
       meals_per_week: { type: "integer", minimum: 1, maximum: 7 },
       monthly_budget_usd: { type: "number", minimum: 0 },
       cuisines: { type: "array", items: { type: "string" } },
+      dietary_restrictions: {
+        type: "array",
+        description:
+          "canonical diet keys the whole household needs honored; empty if none. Allowed: vegetarian, vegan, pescatarian, gluten_free, dairy_free, halal, kosher, no_pork, no_beef, no_poultry, no_shellfish, no_fish, no_nuts, no_soy, no_egg",
+        items: {
+          type: "string",
+          enum: [
+            "vegetarian", "vegan", "pescatarian", "gluten_free", "dairy_free",
+            "halal", "kosher", "no_pork", "no_beef", "no_poultry",
+            "no_shellfish", "no_fish", "no_nuts", "no_soy", "no_egg",
+          ],
+        },
+      },
+      excluded_ingredients: {
+        type: "array",
+        description:
+          "specific ingredient names (or allergen words like 'peanuts') to always avoid, beyond the canonical diet keys; empty if none",
+        items: { type: "string" },
+      },
     },
-    required: ["adults", "kids", "meals_per_week", "monthly_budget_usd", "cuisines"],
+    required: [
+      "adults", "kids", "meals_per_week", "monthly_budget_usd", "cuisines",
+      "dietary_restrictions",
+    ],
   },
 };
 
@@ -134,6 +157,12 @@ async function saveSetup(
   const cuisines = Array.isArray(input.cuisines)
     ? (input.cuisines as unknown[]).map((c) => String(c)).filter(Boolean)
     : [];
+  const dietary_restrictions = Array.isArray(input.dietary_restrictions)
+    ? (input.dietary_restrictions as unknown[]).map((c) => String(c)).filter(Boolean)
+    : [];
+  const excluded_ingredients = Array.isArray(input.excluded_ingredients)
+    ? (input.excluded_ingredients as unknown[]).map((c) => String(c)).filter(Boolean)
+    : [];
 
   const { error } = await db.from("household_preferences").upsert(
     {
@@ -143,6 +172,8 @@ async function saveSetup(
       meals_per_week: meals,
       monthly_budget_usd: budget,
       cuisines,
+      dietary_restrictions,
+      excluded_ingredients,
       onboarded: true,
       updated_at: new Date().toISOString(),
     },

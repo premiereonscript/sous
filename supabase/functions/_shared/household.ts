@@ -12,6 +12,11 @@ export interface Preferences {
   meals_per_week: number;
   monthly_budget_usd: number | null;
   cuisines: string[];
+  // Canonical diet keys the household needs honored (vegetarian, halal, no_pork,
+  // …). Enforced as a hard filter in candidate_recipes — not just a prompt hint.
+  dietary_restrictions: string[];
+  // Specific ingredient names / allergen words to always avoid.
+  excluded_ingredients: string[];
   // Ingredient names the household already has / gets for free, so they're kept
   // off the shopping list (e.g. eggs for a household with backyard chickens).
   // Empty by default — no assumption that anyone has a free source.
@@ -25,6 +30,8 @@ export const DEFAULT_PREFS: Preferences = {
   meals_per_week: 5,
   monthly_budget_usd: null,
   cuisines: [],
+  dietary_restrictions: [],
+  excluded_ingredients: [],
   free_staples: [],
   onboarded: false,
 };
@@ -45,6 +52,8 @@ export async function getPreferences(
     meals_per_week: data.meals_per_week ?? 5,
     monthly_budget_usd: data.monthly_budget_usd ?? null,
     cuisines: (data.cuisines ?? []) as string[],
+    dietary_restrictions: (data.dietary_restrictions ?? []) as string[],
+    excluded_ingredients: (data.excluded_ingredients ?? []) as string[],
     free_staples: (data.free_staples ?? []) as string[],
     onboarded: !!data.onboarded,
   };
@@ -59,6 +68,9 @@ export interface PreferenceUpdate {
   meals_per_week?: number;
   monthly_budget_usd?: number | null;
   cuisines?: string[];
+  dietary_restrictions?: string[];
+  excluded_ingredients?: string[];
+  free_staples?: string[];
 }
 
 export async function updatePreferences(
@@ -75,6 +87,13 @@ export async function updatePreferences(
     next.monthly_budget_usd = patch.monthly_budget_usd;
   }
   if (patch.cuisines !== undefined) next.cuisines = patch.cuisines;
+  if (patch.dietary_restrictions !== undefined) {
+    next.dietary_restrictions = patch.dietary_restrictions;
+  }
+  if (patch.excluded_ingredients !== undefined) {
+    next.excluded_ingredients = patch.excluded_ingredients;
+  }
+  if (patch.free_staples !== undefined) next.free_staples = patch.free_staples;
 
   const { error } = await db.from("household_preferences").upsert(
     {
@@ -84,6 +103,9 @@ export async function updatePreferences(
       meals_per_week: next.meals_per_week,
       monthly_budget_usd: next.monthly_budget_usd,
       cuisines: next.cuisines,
+      dietary_restrictions: next.dietary_restrictions,
+      excluded_ingredients: next.excluded_ingredients,
+      free_staples: next.free_staples,
       onboarded: true,
       updated_at: new Date().toISOString(),
     },
@@ -127,6 +149,12 @@ export function describeHousehold(p: Preferences): HouseholdDescription {
   }
   if (p.cuisines.length) {
     lines.push(`- Cuisines they like: ${joinList(p.cuisines)}.`);
+  }
+  const avoid = [...p.dietary_restrictions, ...p.excluded_ingredients];
+  if (avoid.length) {
+    lines.push(
+      `- Dietary rules (HARD — never suggest anything that violates these; already filtered from your options): ${joinList(avoid)}.`,
+    );
   }
   if (p.free_staples.length) {
     lines.push(
