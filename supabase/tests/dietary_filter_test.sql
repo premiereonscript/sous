@@ -2,7 +2,7 @@
 -- Runs via `supabase test db`, inside a rolled-back transaction.
 
 begin;
-select plan(6);
+select plan(8);
 
 -- ---------------------------------------------------------------------------
 -- Fixtures: two never-used recipes — one vegetarian (tofu, soy), one pork.
@@ -62,6 +62,19 @@ select is(
   (select count(*)::int from candidate_recipes(28, 40, 'c0000000-0000-0000-0000-0000000000fs')
      where title = 'Test Veg'),
   0, 'excluded_ingredients by allergen: soy drops the tofu recipe');
+
+-- 7 & 8. The seeded catalog leaves a vegan household a usable pool (T18):
+--    at least 6 vegan mains, and no pork dish sneaks in.
+insert into households (id, name) values ('c0000000-0000-0000-0000-0000000000fw', 'Vegan');
+insert into household_preferences (household_id, dietary_restrictions) values
+  ('c0000000-0000-0000-0000-0000000000fw', '{vegan}');
+select cmp_ok(
+  (select count(*)::int from candidate_recipes(28, 40, 'c0000000-0000-0000-0000-0000000000fw')),
+  '>=', 6, 'vegan household has at least 6 candidate recipes (T18 catalog balance)');
+select is(
+  (select count(*)::int from candidate_recipes(28, 40, 'c0000000-0000-0000-0000-0000000000fw')
+     where title = 'Carnitas Bowls'),
+  0, 'vegan household never sees the pork carnitas');
 
 select * from finish();
 rollback;
