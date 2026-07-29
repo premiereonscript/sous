@@ -197,6 +197,22 @@ export function formatMoney(amount: number, currency = "USD", locale = "en-US"):
   }
 }
 
+// True for an English locale (en, en-US, en-GB, …) — the default; such households
+// get no extra language instruction.
+export function isEnglish(locale: string): boolean {
+  return /^en(-|$)/i.test(locale);
+}
+
+// Human language name for a locale (e.g. "es-ES" -> "Spanish").
+export function languageName(locale: string): string {
+  try {
+    const base = locale.split("-")[0];
+    return new Intl.DisplayNames(["en"], { type: "language" }).of(base) ?? locale;
+  } catch {
+    return locale;
+  }
+}
+
 export function describeHousehold(p: Preferences): HouseholdDescription {
   const hasBaby = p.kids.some((k) => k.age_months < 12);
   const hasKids = p.kids.length > 0;
@@ -249,6 +265,14 @@ export function describeHousehold(p: Preferences): HouseholdDescription {
     );
   }
   if (safety.length) lines.push(`Food safety: ${safety.join(" ")}`);
+
+  if (!isEnglish(p.locale)) {
+    lines.push(
+      `- Language: write ALL of your replies, recipe cards, and shopping-list items in ${
+        languageName(p.locale)
+      }. (The starter recipe catalog is in English — translate it as you present dishes.)`,
+    );
+  }
 
   return {
     serving,

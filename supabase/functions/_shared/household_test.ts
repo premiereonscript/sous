@@ -6,7 +6,14 @@
 // Run: deno test supabase/functions/_shared/household_test.ts
 
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
-import { describeHousehold, DEFAULT_PREFS, formatMoney, type Preferences } from "./household.ts";
+import {
+  DEFAULT_PREFS,
+  describeHousehold,
+  formatMoney,
+  isEnglish,
+  languageName,
+  type Preferences,
+} from "./household.ts";
 
 function prefs(overrides: Partial<Preferences> = {}): Preferences {
   return { ...DEFAULT_PREFS, ...overrides };
@@ -94,6 +101,23 @@ Deno.test("metric households get a metric-units instruction; imperial ones don't
 Deno.test("formatMoney falls back gracefully on a bad currency code", () => {
   assertStringIncludes(formatMoney(230, "USD", "en-US"), "230");
   assertStringIncludes(formatMoney(230, "NOTREAL", "en-US"), "230");
+});
+
+Deno.test("English households get no language instruction; others do", () => {
+  assert(!describeHousehold(prefs()).context.includes("Language:"));
+  assert(!describeHousehold(prefs({ locale: "en-GB" })).context.includes("Language:"));
+  const es = describeHousehold(prefs({ locale: "es-ES" }));
+  assertStringIncludes(es.context, "Language:");
+  assertStringIncludes(es.context, "Spanish");
+});
+
+Deno.test("isEnglish / languageName helpers", () => {
+  assert(isEnglish("en"));
+  assert(isEnglish("en-US"));
+  assert(!isEnglish("es-ES"));
+  assert(!isEnglish("fr"));
+  assertEquals(languageName("es-ES"), "Spanish");
+  assertEquals(languageName("fr-FR"), "French");
 });
 
 Deno.test("cuisines are listed when present, omitted when empty", () => {

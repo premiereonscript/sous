@@ -164,6 +164,11 @@ const TOOLS = [
           description:
             "FULL replacement list of shopping-list section labels, in order, e.g. ['Grocery'] or ['Farmers Market','Grocery']. Use for 'I also shop a farmers market' or 'I just use one store'.",
         },
+        locale: {
+          type: "string",
+          description:
+            "BCP-47 locale, e.g. es-ES, fr-FR, de-DE, en-US — sets the reply language and date/number formatting. Use for 'talk to me in Spanish'.",
+        },
       },
     },
   },
@@ -511,6 +516,9 @@ async function applyPreferenceUpdate(
   if (typeof input.unit_system === "string" &&
       ["imperial", "metric"].includes(input.unit_system)) {
     patch.unit_system = input.unit_system;
+  }
+  if (typeof input.locale === "string" && input.locale.trim()) {
+    patch.locale = input.locale.trim();
   }
   if (Object.keys(patch).length === 0) return "nothing to update";
 

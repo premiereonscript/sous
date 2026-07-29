@@ -263,7 +263,7 @@ export async function proposePlan(conversationId: string): Promise<void> {
     ? `\n🍼 <i>Baby: pull a plain, soft, unsalted spoonful before salt/spice/acid — no honey.</i>`
     : "";
   await post(
-    `🗒️ <b>Your week · ${esc(fmt(weekOf))}–${esc(fmt(dayDate(weekOf, lastDay)))}</b>\n` +
+    `🗒️ <b>Your week · ${esc(fmt(weekOf, desc.locale))}–${esc(fmt(dayDate(weekOf, lastDay), desc.locale))}</b>\n` +
       `${chosen.length} dinner${chosen.length > 1 ? "s" : ""} below, then the shopping list. Tap 🔄 to swap any dish.${babyLine}`,
   );
 
@@ -792,7 +792,7 @@ export async function sendCurrentPlan(conversationId: string): Promise<boolean> 
     ? `\n🍼 <i>Baby: pull a plain, soft, unsalted spoonful before salt/spice/acid — no honey.</i>`
     : "";
   await post(
-    `🗒️ <b>Your week · ${esc(fmt(firstDay))}–${esc(fmt(lastDay))}</b>\n` +
+    `🗒️ <b>Your week · ${esc(fmt(firstDay, desc.locale))}–${esc(fmt(lastDay, desc.locale))}</b>\n` +
       `${rows.length} dinner${rows.length > 1 ? "s" : ""} below, then the shopping list. Tap 🔄 to swap or 📖 for the full recipe.${babyLine}`,
   );
 
@@ -1536,10 +1536,10 @@ function dayDate(weekOf: string, day: DayKey): string {
   return d.toISOString().slice(0, 10);
 }
 
-function fmt(iso: string): string {
+function fmt(iso: string, locale = "en-US"): string {
   const [y, mo, da] = iso.split("-").map(Number);
   const d = new Date(Date.UTC(y, mo - 1, da));
-  return d.toLocaleDateString("en-US", {
+  return d.toLocaleDateString(locale, {
     month: "short",
     day: "numeric",
     timeZone: "UTC",
