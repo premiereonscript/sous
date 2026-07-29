@@ -12,29 +12,58 @@
 import { dbClient } from "../_shared/db.ts";
 import { proposePlan } from "../_shared/planner.ts";
 import { sendMessage } from "../_shared/telegram.ts";
+import { localDayHour } from "../_shared/schedule.ts";
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
 
 const GREETING = "Fresh dinners incoming ☕ — pulling your week together, one sec.\n" +
   "(Rate last week's hits any time — just tell me, e.g. “the tacos were a 5”.)";
 
-Deno.serve((req: Request): Response => {
+Deno.serve(async (req: Request): Promise<Response> => {
   const secret = req.headers.get("x-kickoff-secret");
   if (!secret || secret !== Deno.env.get("KICKOFF_SECRET")) {
     return new Response("forbidden", { status: 403 });
   }
 
-  const work = runKickoff().catch((e) => console.error("kickoff failed", e));
+  // The hourly cron sends {"scheduled": true}: only kick off households whose
+  // LOCAL plan_day/plan_hour is right now. Manual triggers (trigger_kickoff_now,
+  // an empty body) force every household immediately.
+  const body = await req.json().catch(() => ({} as Record<string, unknown>));
+  const scheduled = (body as { scheduled?: unknown })?.scheduled === true;
+
+  const work = runKickoff(scheduled).catch((e) => console.error("kickoff failed", e));
   if (typeof EdgeRuntime !== "undefined") EdgeRuntime.waitUntil(work);
 
-  return new Response(JSON.stringify({ ok: true }), {
+  return new Response(JSON.stringify({ ok: true, scheduled }), {
     headers: { "content-type": "application/json" },
   });
 });
 
-async function runKickoff(): Promise<void> {
+async function runKickoff(scheduled: boolean): Promise<void> {
   const db = dbClient();
   const botToken = Deno.env.get("TELEGRAM_BOT_TOKEN")!;
+
+  // Which households are due right now (all of them for a manual/forced run).
+  const due = new Set<string>();
+  if (scheduled) {
+    const now = new Date();
+    const { data: households } = await db.from("households").select("id, timezone");
+    const { data: prefs } = await db
+      .from("household_preferences")
+      .select("household_id, plan_day, plan_hour");
+    const prefById = new Map(
+      ((prefs ?? []) as { household_id: string; plan_day: string; plan_hour: number }[])
+        .map((p) => [p.household_id, p]),
+    );
+    for (const h of (households ?? []) as { id: string; timezone: string }[]) {
+      const p = prefById.get(h.id);
+      const planDay = p?.plan_day ?? "fri";
+      const planHour = p?.plan_hour ?? 18;
+      const { day, hour } = localDayHour(h.timezone ?? "America/Los_Angeles", now);
+      if (day === planDay && hour === planHour) due.add(h.id);
+    }
+    if (due.size === 0) return; // nothing scheduled this hour
+  }
 
   const { data: convos } = await db
     .from("conversations")
@@ -56,6 +85,7 @@ async function runKickoff(): Promise<void> {
       telegram_chat_id: number;
     }[]
   ) {
+    if (scheduled && !due.has(c.household_id)) continue; // not this household's hour
     if (seenHouseholds.has(c.household_id)) {
       console.warn(
         `kickoff: skipping conversation ${c.id} — household ${c.household_id} already kicked off this run`,
