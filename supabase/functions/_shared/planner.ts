@@ -16,6 +16,7 @@ import {
 } from "./telegram.ts";
 import {
   describeHousehold,
+  formatMoney,
   getPreferences,
   type HouseholdDescription,
 } from "./household.ts";
@@ -890,7 +891,7 @@ const CUSTOMIZE_TOOL = {
             action: { type: "string", enum: ["add", "remove"] },
             name: { type: "string", description: "concrete ingredient, e.g. 'Italian sausage' — never vague like 'meat'" },
             quantity: { type: "number", description: "for add: amount, sized for this household" },
-            unit: { type: "string", description: "for add: unit, e.g. 'lb', 'oz', 'each', 'can'" },
+            unit: { type: "string", description: "for add: unit — match the household's unit system (imperial 'lb'/'oz' or metric 'g'/'kg'/'ml'), plus 'each'/'can'/'bunch'" },
             source_hint: {
               type: "string",
               enum: ["farmers_market", "grocery", "either"],
@@ -1471,8 +1472,8 @@ function plannerSystem(
     })
     .join("\n");
   const budgetLine = desc.weeklyBudget
-    ? `they shop one farmers-market + grocery run, ~$${desc.weeklyBudget}/week`
-    : "they shop one farmers-market + grocery run";
+    ? `~${formatMoney(desc.weeklyBudget, desc.currency, desc.locale)}/week`
+    : "a sensible weekly budget";
   return `You are the planner for this household, choosing ${n} dinner${n > 1 ? "s" : ""} for the week. Today is ${
     new Date().toISOString().slice(0, 10)
   }; you are planning the week of ${weekOf}.

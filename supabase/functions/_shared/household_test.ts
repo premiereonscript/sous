@@ -6,7 +6,7 @@
 // Run: deno test supabase/functions/_shared/household_test.ts
 
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
-import { describeHousehold, DEFAULT_PREFS, type Preferences } from "./household.ts";
+import { describeHousehold, DEFAULT_PREFS, formatMoney, type Preferences } from "./household.ts";
 
 function prefs(overrides: Partial<Preferences> = {}): Preferences {
   return { ...DEFAULT_PREFS, ...overrides };
@@ -76,6 +76,24 @@ Deno.test("dietary restrictions + excluded ingredients render as HARD rules", ()
   assertStringIncludes(d.context, "vegetarian");
   assertStringIncludes(d.context, "no_nuts");
   assertStringIncludes(d.context, "cilantro");
+});
+
+Deno.test("budget renders in the household's currency, not a hardcoded $", () => {
+  const usd = describeHousehold(prefs({ monthly_budget_usd: 1000 }));
+  assertStringIncludes(usd.context, "$230");
+  const eur = describeHousehold(prefs({ monthly_budget_usd: 1000, currency: "EUR", locale: "de-DE" }));
+  assert(!eur.context.includes("$"), "EUR household must not show a dollar sign");
+  assertStringIncludes(eur.context, "€");
+});
+
+Deno.test("metric households get a metric-units instruction; imperial ones don't", () => {
+  assertStringIncludes(describeHousehold(prefs({ unit_system: "metric" })).context, "METRIC");
+  assert(!describeHousehold(prefs()).context.includes("METRIC"));
+});
+
+Deno.test("formatMoney falls back gracefully on a bad currency code", () => {
+  assertStringIncludes(formatMoney(230, "USD", "en-US"), "230");
+  assertStringIncludes(formatMoney(230, "NOTREAL", "en-US"), "230");
 });
 
 Deno.test("cuisines are listed when present, omitted when empty", () => {

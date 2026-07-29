@@ -11,6 +11,11 @@ export interface Preferences {
   kids: Kid[];
   meals_per_week: number;
   monthly_budget_usd: number | null;
+  // ISO 4217 currency + BCP-47 locale for formatting money/dates, and the
+  // measurement system the LLM should generate quantities in.
+  currency: string;
+  unit_system: string; // "imperial" | "metric"
+  locale: string;
   cuisines: string[];
   // Canonical diet keys the household needs honored (vegetarian, halal, no_pork,
   // …). Enforced as a hard filter in candidate_recipes — not just a prompt hint.
@@ -31,6 +36,9 @@ export const DEFAULT_PREFS: Preferences = {
   kids: [],
   meals_per_week: 5,
   monthly_budget_usd: null,
+  currency: "USD",
+  unit_system: "imperial",
+  locale: "en-US",
   cuisines: [],
   dietary_restrictions: [],
   excluded_ingredients: [],
@@ -54,6 +62,9 @@ export async function getPreferences(
     kids: (data.kids ?? []) as Kid[],
     meals_per_week: data.meals_per_week ?? 5,
     monthly_budget_usd: data.monthly_budget_usd ?? null,
+    currency: (data.currency ?? "USD") as string,
+    unit_system: (data.unit_system ?? "imperial") as string,
+    locale: (data.locale ?? "en-US") as string,
     cuisines: (data.cuisines ?? []) as string[],
     dietary_restrictions: (data.dietary_restrictions ?? []) as string[],
     excluded_ingredients: (data.excluded_ingredients ?? []) as string[],
@@ -76,6 +87,9 @@ export interface PreferenceUpdate {
   excluded_ingredients?: string[];
   free_staples?: string[];
   persona_style?: string;
+  currency?: string;
+  unit_system?: string;
+  locale?: string;
 }
 
 export async function updatePreferences(
@@ -100,6 +114,9 @@ export async function updatePreferences(
   }
   if (patch.free_staples !== undefined) next.free_staples = patch.free_staples;
   if (patch.persona_style !== undefined) next.persona_style = patch.persona_style;
+  if (patch.currency !== undefined) next.currency = patch.currency;
+  if (patch.unit_system !== undefined) next.unit_system = patch.unit_system;
+  if (patch.locale !== undefined) next.locale = patch.locale;
 
   const { error } = await db.from("household_preferences").upsert(
     {
@@ -108,6 +125,9 @@ export async function updatePreferences(
       kids: next.kids,
       meals_per_week: next.meals_per_week,
       monthly_budget_usd: next.monthly_budget_usd,
+      currency: next.currency,
+      unit_system: next.unit_system,
+      locale: next.locale,
       cuisines: next.cuisines,
       dietary_restrictions: next.dietary_restrictions,
       excluded_ingredients: next.excluded_ingredients,
@@ -131,9 +151,25 @@ export interface HouseholdDescription {
   weeklyBudget: number | null;
   freeStaples: string[]; // ingredients the household already has (off the list)
   personaStyle: string; // chef voice: weissman | neutral | warm
+  currency: string;
+  unitSystem: string;
+  locale: string;
 }
 
 const WEEKS_PER_MONTH = 4.345;
+
+// Format an amount in the household's currency + locale (e.g. "$230", "€230").
+export function formatMoney(amount: number, currency = "USD", locale = "en-US"): string {
+  try {
+    return new Intl.NumberFormat(locale, {
+      style: "currency",
+      currency,
+      maximumFractionDigits: 0,
+    }).format(amount);
+  } catch {
+    return `${currency} ${Math.round(amount)}`;
+  }
+}
 
 export function describeHousehold(p: Preferences): HouseholdDescription {
   const hasBaby = p.kids.some((k) => k.age_months < 12);
@@ -152,8 +188,13 @@ export function describeHousehold(p: Preferences): HouseholdDescription {
   lines.push(`- Dinners to plan per week: ${p.meals_per_week}.`);
   if (weeklyBudget) {
     lines.push(
-      `- Grocery budget: ~$${weeklyBudget}/week (from $${p.monthly_budget_usd}/month) across farmers market + grocery.`,
+      `- Grocery budget: ~${formatMoney(weeklyBudget, p.currency, p.locale)}/week (from ${
+        formatMoney(p.monthly_budget_usd!, p.currency, p.locale)
+      }/month).`,
     );
+  }
+  if (p.unit_system === "metric") {
+    lines.push("- Use METRIC units (g, kg, ml, L, °C) in recipes and the shopping list.");
   }
   if (p.cuisines.length) {
     lines.push(`- Cuisines they like: ${joinList(p.cuisines)}.`);
@@ -192,6 +233,9 @@ export function describeHousehold(p: Preferences): HouseholdDescription {
     weeklyBudget,
     freeStaples: p.free_staples,
     personaStyle: p.persona_style,
+    currency: p.currency,
+    unitSystem: p.unit_system,
+    locale: p.locale,
   };
 }
 

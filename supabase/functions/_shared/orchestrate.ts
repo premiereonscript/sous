@@ -149,6 +149,15 @@ const TOOLS = [
           description:
             "the chef's tone. Use for 'talk to me plainly' (neutral), 'be less intense'/'be sweeter' (warm), or 'bring the energy' (weissman).",
         },
+        currency: {
+          type: "string",
+          description: "ISO 4217 currency code for the budget, e.g. USD, EUR, GBP",
+        },
+        unit_system: {
+          type: "string",
+          enum: ["imperial", "metric"],
+          description: "measurement units for recipes + shopping list ('use metric')",
+        },
       },
     },
   },
@@ -487,6 +496,13 @@ async function applyPreferenceUpdate(
   if (typeof input.persona_style === "string" &&
       ["weissman", "neutral", "warm"].includes(input.persona_style)) {
     patch.persona_style = input.persona_style;
+  }
+  if (typeof input.currency === "string" && input.currency.trim()) {
+    patch.currency = input.currency.trim().toUpperCase();
+  }
+  if (typeof input.unit_system === "string" &&
+      ["imperial", "metric"].includes(input.unit_system)) {
+    patch.unit_system = input.unit_system;
   }
   if (Object.keys(patch).length === 0) return "nothing to update";
 
