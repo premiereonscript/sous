@@ -99,7 +99,8 @@ send the bot one message.
 Follow [`SETUP.md`](./SETUP.md) step by step. Same steps the script runs.
 
 When you're done, message your bot **"hi"** — it'll walk you through a quick
-setup (family, meals/week, budget, cuisines), then say **"plan my week."**
+setup (household, meals/week, budget, cuisines, and any diet/allergies), then
+say **"plan my week."**
 
 ## Project layout
 
@@ -109,27 +110,72 @@ SETUP.md                     step-by-step setup (human- and agent-followable)
 setup.sh                     guided one-command setup
 supabase/
   config.toml                Edge Function config (verify_jwt per function)
-  migrations/                schema + planner SQL + recipe catalog (50 recipes)
+  migrations/                schema + planner SQL + recipe catalog (58 recipes)
+  tests/                     pgTAP database tests (run via `supabase test db`)
   functions/
     tg_webhook/              Telegram webhook (auth, persist, route)
     orchestrator/            conversational agent — swap, customize, exclude,
                              rate, lock, expand recipe, update preferences
-    kickoff_week/            Friday cron entry point
+    kickoff_week/            hourly cron entry point (timezone-aware kickoff)
     send_list/               on-demand shopping list / resend current plan
     _shared/                 db, anthropic, telegram, planner, intent,
-                             persona, household, onboarding
+                             persona, household, onboarding, schedule
+deno.json                    tasks: check / test / fmt / lint
+.github/workflows/ci.yml     CI: deno check + test, and pgTAP on a live stack
 ```
+
+## Make it yours
+
+Sous adapts to your household — most of it just by **texting the bot**, no config
+files. Onboarding asks the essentials; after that, tell Sous things like:
+
+- **Diet & allergies** — *"we're vegetarian"*, *"no pork"*, *"peanut allergy"*.
+  These are a **hard filter** on recipe selection, not a polite suggestion.
+- **How you shop** — *"I just use one store"* (the default: a single grocery
+  list) or *"I also shop a farmers market"* (splits the list). Labels are yours
+  (*"call it Costco"*).
+- **Free staples** — *"we have chickens, skip eggs"* keeps anything you already
+  have off the list. Nothing is skipped by default.
+- **Money & units** — *"budget is €900/month"*, *"use metric"*.
+- **Schedule** — plan fewer/more dinners, cook longer on weeknights, or plan
+  only certain days. The weekly kick-off fires at **your** local time.
+- **Voice** — *"talk to me plainly"* (neutral) / *"be sweeter"* (warm) / the
+  default high-energy chef.
+- **Language** — *"responde en español"* switches replies to your language.
+
+Deeper changes live in the repo:
+
+- **Recipes** — the catalog is **58 dishes** in
+  `supabase/migrations/*_seed_recipes*.sql` (+ plant-based mains). Add your own
+  by following the same pattern — an `ingredients` row per new item, a `recipes`
+  row (with `base_servings` + `dietary_tags`), and its `recipe_ingredients` —
+  then `supabase db push`. Sous also creates recipe **variants** on the fly when
+  you customize a dish in chat.
+- **Models** — override `SOUS_INTENT_MODEL` / `SOUS_CHAT_MODEL` /
+  `SOUS_PLANNER_MODEL` (see `.env.example`) for cost or model choice.
 
 ## Notes & limitations
 
-- **Single household per deploy.** By design (see the spec's skip list). To run
-  it for another family, deploy another instance.
-- **Friday cron runs in UTC** (`0 1 * * 6` ≈ Fri 6pm Pacific in summer); it
-  drifts an hour under PST. Adjust the schedule in the cron migration if you're
-  in another timezone.
-- **Kid-safety is currently prompt-enforced.** The code-side `unsafe_for_age`
-  block-list from the spec (§10.7) is not built yet — a good first contribution.
+- **Single household per deploy.** By design — one deploy serves one household
+  (its members can each DM the bot and share a group chat; the weekly plan fans
+  out to all of them). To run it for another family, deploy another instance.
+- **English-first (v1).** Replies and generated content follow the household's
+  language, and money/dates are localized — but the fixed UI strings (e.g. the
+  "Shopping list" header) and the starter recipe catalog are English. Full
+  translation is a good contribution.
+- **Kid-safety is prompt-enforced.** The code-side `unsafe_for_age` block-list
+  from the spec (§10.7) isn't built yet — a good first contribution. (Dietary
+  and allergy avoidance *is* enforced in code, in `candidate_recipes`.)
 - Costs are tiny but **real** — the Anthropic key bills per use. Set a spend cap.
+
+## Tests
+
+```bash
+deno task check   # type-check the edge functions
+deno task test    # unit tests (pure logic)
+supabase test db  # pgTAP database tests (needs a local Supabase / Docker)
+```
+CI runs all three on every PR.
 
 ## License
 

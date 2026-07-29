@@ -6,6 +6,22 @@ proposes five dinners (Mon–Fri), iterates, and hands back a shopping list
 split between the farmers market and the grocery store — ready for the
 Saturday market run.
 
+> **Generalization note (public v1).** This spec was written for one family;
+> the open-source repo has since been generalized so *any* household can deploy
+> it. What was hardcoded is now per-household preference (diet & allergies —
+> enforced in code; shopping sources; currency & units; cuisines; weeknight
+> schedule & plan days; persona; timezone; language), captured at onboarding
+> and changeable by chat. See the README's "Make it yours". Deliberate v1
+> scope decisions:
+> - **One household per deploy** — members share a household (each can DM the
+>   bot + a group chat; the weekly plan fans out to all). Another family runs
+>   another instance. Not multi-tenant SaaS.
+> - **English-first** — replies and generated content follow the household's
+>   language and money/dates localize, but fixed UI strings and the seed recipe
+>   catalog are English. Full i18n is a follow-up.
+> - **Kid-safety is prompt-enforced** (the §10.7 code block-list is future work);
+>   diet/allergy avoidance *is* enforced in `candidate_recipes`.
+
 ---
 
 ## Council

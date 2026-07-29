@@ -9,6 +9,9 @@
     "exclude": ["supabase/.temp", "supabase/.branches"]
   },
   "lint": {
-    "exclude": ["supabase/.temp", "supabase/.branches"]
+    "exclude": ["supabase/.temp", "supabase/.branches"],
+    "rules": {
+      "exclude": ["no-import-prefix"]
+    }
   }
 }

@@ -135,7 +135,9 @@ curl "https://api.telegram.org/bot<BOT_TOKEN>/setWebhook" \
 
 Message your bot (everything below is just chat — no commands or slashes):
 - **"hi"** → first run kicks off **onboarding**: it asks how many people +
-  kids' ages, dinners per week, monthly budget, and cuisines, then saves them.
+  kids' ages, dinners per week, monthly budget, cuisines, and any dietary
+  restrictions / allergies, then saves them. Everything is adjustable later just
+  by texting (see [Make it yours](./README.md#make-it-yours)).
 - **"plan my week"** → proposes that many dinners with Swap/Lock buttons + a
   shopping list, tuned to your answers.
 - Tap **🔄 Swap** / **✅ Lock** on the cards, or just text it:
@@ -161,9 +163,9 @@ curl -s "https://api.telegram.org/bot<BOT_TOKEN>/getWebhookInfo"
 
 ---
 
-## Optional: Friday auto-plan (cron)
+## Optional: weekly auto-plan (cron)
 
-The `kickoff_week_friday` cron job is already scheduled by the migrations, but
+The `kickoff_week_hourly` cron job is already scheduled by the migrations, but
 it only fires once you store two secrets in **Supabase Vault** (so no secret
 lives in the repo). Run this in the dashboard **SQL Editor** (or via `psql`):
 
@@ -174,9 +176,11 @@ select vault.create_secret('<KICKOFF_SECRET>', 'kickoff_secret')
   where not exists (select 1 from vault.secrets where name = 'kickoff_secret');
 ```
 
-The schedule is `0 1 * * 6` UTC ≈ **Friday 6pm Pacific (PDT)**. Edit
-`supabase/migrations/20260521000400_kickoff_cron.sql` (and re-`cron.schedule`)
-for your timezone.
+The cron runs **hourly** and kicks off each household at its own **local**
+plan time — by default Friday 6pm in the household's timezone. No timezone
+math or DST fiddling needed. To change *when* your household is planned, set
+`households.timezone` (defaults to `America/Los_Angeles`) and the
+`household_preferences.plan_day` / `plan_hour` columns.
 
 ## Manual / off-cycle helpers
 
