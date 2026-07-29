@@ -10,7 +10,7 @@
 // later addition; users can rate dishes any time via chat.)
 
 import { dbClient } from "../_shared/db.ts";
-import { proposePlan } from "../_shared/planner.ts";
+import { proposePlan, sendCurrentPlan } from "../_shared/planner.ts";
 import { sendMessage } from "../_shared/telegram.ts";
 import { localDayHour } from "../_shared/schedule.ts";
 
@@ -70,36 +70,41 @@ async function runKickoff(scheduled: boolean): Promise<void> {
     .select("id, household_id, telegram_chat_id")
     .order("created_at", { ascending: true });
 
-  // A household can have more than one Telegram chat attached (e.g. a DM and
-  // a group chat) — proposePlan upserts ONE meal_plan per (household_id,
-  // week_of), so running it again for the same household mid-loop deletes
-  // and replaces the first chat's picks: that chat is left with recipe
-  // cards, a shopping list, and Swap/Lock buttons pointing at meal_plan_items
-  // that no longer exist. Until every attached chat gets the plan fanned out
-  // (not just the one that runs first), only kick off once per household.
-  const seenHouseholds = new Set<string>();
-  for (
-    const c of (convos ?? []) as {
-      id: string;
-      household_id: string;
-      telegram_chat_id: number;
-    }[]
-  ) {
+  // Group conversations by household. A household can have more than one chat
+  // (e.g. each parent's DM + a family group chat).
+  type Convo = { id: string; household_id: string; telegram_chat_id: number };
+  const byHousehold = new Map<string, Convo[]>();
+  for (const c of (convos ?? []) as Convo[]) {
     if (scheduled && !due.has(c.household_id)) continue; // not this household's hour
-    if (seenHouseholds.has(c.household_id)) {
-      console.warn(
-        `kickoff: skipping conversation ${c.id} — household ${c.household_id} already kicked off this run`,
-      );
-      continue;
-    }
-    seenHouseholds.add(c.household_id);
+    const list = byHousehold.get(c.household_id) ?? [];
+    list.push(c);
+    byHousehold.set(c.household_id, list);
+  }
 
-    await db.from("messages").insert({
-      conversation_id: c.id,
-      direction: "out",
-      text: GREETING,
-    });
-    await sendMessage(botToken, c.telegram_chat_id, GREETING);
-    await proposePlan(c.id);
+  for (const [, hhConvos] of byHousehold) {
+    // Greet every chat.
+    for (const c of hhConvos) {
+      await db.from("messages").insert({ conversation_id: c.id, direction: "out", text: GREETING });
+      await sendMessage(botToken, c.telegram_chat_id, GREETING);
+    }
+
+    // Generate the week ONCE (proposePlan upserts one meal_plan per household +
+    // sends the cards/list to this chat), then fan the SAME plan out to the
+    // household's other chats so none is left empty or with stale buttons.
+    const [first, ...rest] = hhConvos;
+    await proposePlan(first.id);
+    if (rest.length === 0) continue;
+
+    const { data: f } = await db
+      .from("conversations")
+      .select("active_plan_id")
+      .eq("id", first.id)
+      .maybeSingle();
+    const planId = f?.active_plan_id as string | undefined;
+    if (!planId) continue;
+    for (const c of rest) {
+      await db.from("conversations").update({ active_plan_id: planId }).eq("id", c.id);
+      await sendCurrentPlan(c.id);
+    }
   }
 }

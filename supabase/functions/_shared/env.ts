@@ -11,8 +11,10 @@ export function getEnv(): Env {
   return {
     botToken: Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "",
     webhookSecret: Deno.env.get("TG_WEBHOOK_SECRET") ?? "",
-    // Comma-separated Telegram IDs: the two spouses' user IDs and/or the group
-    // chat id. SPEC §10.2 — exactly the known household, everything else dropped.
+    // Comma-separated Telegram IDs allowed to use this deploy's bot: each
+    // person's user id and/or a group chat id. One deploy = one household, so
+    // every allowed id belongs to the same household; all others are dropped
+    // (SPEC §10.2).
     allowedChatIds: (Deno.env.get("TELEGRAM_ALLOWED_CHAT_IDS") ?? "")
       .split(",")
       .map((s) => s.trim())
