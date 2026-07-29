@@ -32,7 +32,7 @@ printf '%s' "$KICKOFF_SECRET" > supabase/.temp/.kickoff-secret
 say "Linking project"
 supabase link --project-ref "$PROJECT_REF" --password "$DB_PASSWORD"
 
-say "Applying database (schema + 50-recipe catalog)"
+say "Applying database (schema + 58-recipe catalog)"
 echo "y" | SUPABASE_DB_PASSWORD="$DB_PASSWORD" supabase db push
 
 say "Setting function secrets"

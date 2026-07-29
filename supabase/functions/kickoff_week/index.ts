@@ -1,4 +1,4 @@
-// kickoff_week — the Friday 6pm job (SPEC §9.3 / §9.5).
+// kickoff_week — the weekly kickoff job (SPEC §9.3 / §9.5).
 // Triggered by pg_cron via pg_net, gated by a shared secret header. For each
 // household conversation: a short Sous greeting, then propose next week.
 //

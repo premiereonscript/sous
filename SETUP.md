@@ -72,7 +72,7 @@ All commands run from the repo root. Replace `<PLACEHOLDERS>`.
 supabase link --project-ref <PROJECT_REF>      # prompts for DB password
 ```
 
-### 5. Apply the database (schema + 50-recipe catalog)
+### 5. Apply the database (schema + 58-recipe catalog)
 ```bash
 supabase db push
 ```

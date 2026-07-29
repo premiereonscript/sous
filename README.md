@@ -40,7 +40,8 @@ Everything is a conversation — no commands, buttons optional.
   chickens).
 - **Ask anytime** — *"send me the grocery list"* re-sends the current list;
   *"show me the full teriyaki recipe"* expands a full card.
-- **Friday 6pm** (optional cron), Sous proactively proposes the next week.
+- **Weekly** (optional cron), Sous proactively proposes the next week — at your
+  household's local plan time (default Friday 6pm, any timezone).
 
 ## How it works
 
@@ -50,7 +51,7 @@ Telegram ─webhook─> tg_webhook ─> orchestrator ─┐ chat · rate · swap
    └───── replies ──────┤        └──> planner (propose / swap / customize / list) ┘ (Anthropic)
                         │
                         ▼
-                Supabase Postgres ◄─ pg_cron (Fri 6pm) ──> kickoff_week
+                Supabase Postgres ◄─ pg_cron (hourly) ──> kickoff_week
                         │
                         └─ triggers ──> send_list  (on-demand list / resend plan)
 ```
