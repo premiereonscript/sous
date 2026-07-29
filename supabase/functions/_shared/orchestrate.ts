@@ -30,7 +30,7 @@ import {
 } from "./planner.ts";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 
-const WORKHORSE_MODEL = "claude-sonnet-4-6"; // SPEC §9.1
+const WORKHORSE_MODEL = Deno.env.get("SOUS_CHAT_MODEL") ?? "claude-sonnet-4-6";
 const MAX_TOOL_ROUNDS = 5;
 
 // ---- tools the chat agent can call ---------------------------------------
@@ -143,6 +143,12 @@ const TOOLS = [
           description:
             "FULL replacement list of ingredients the household already has (kept off the shopping list), e.g. 'eggs' if they keep chickens",
         },
+        persona_style: {
+          type: "string",
+          enum: ["weissman", "neutral", "warm"],
+          description:
+            "the chef's tone. Use for 'talk to me plainly' (neutral), 'be less intense'/'be sweeter' (warm), or 'bring the energy' (weissman).",
+        },
       },
     },
   },
@@ -200,7 +206,7 @@ export async function runOrchestrator(conversationId: string): Promise<string> {
 
   const desc = describeHousehold(await getPreferences(db, convo.household_id));
   const planCtx = await planContextBlock(db, convo.household_id);
-  const SYSTEM = sousSystem(desc.context) +
+  const SYSTEM = sousSystem(desc.context, desc.personaStyle) +
     (planCtx ? `\n\n${planCtx}` : "") + AGENT_INSTRUCTION;
 
   // Who sent the latest inbound turn (the rater / actor).
@@ -477,6 +483,10 @@ async function applyPreferenceUpdate(
     if (Array.isArray(input[field])) {
       patch[field] = (input[field] as unknown[]).map((c) => String(c)).filter(Boolean);
     }
+  }
+  if (typeof input.persona_style === "string" &&
+      ["weissman", "neutral", "warm"].includes(input.persona_style)) {
+    patch.persona_style = input.persona_style;
   }
   if (Object.keys(patch).length === 0) return "nothing to update";
 

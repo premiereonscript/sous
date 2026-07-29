@@ -21,6 +21,8 @@ export interface Preferences {
   // off the shopping list (e.g. eggs for a household with backyard chickens).
   // Empty by default — no assumption that anyone has a free source.
   free_staples: string[];
+  // Chef voice: "weissman" (default), "neutral", or "warm".
+  persona_style: string;
   onboarded: boolean;
 }
 
@@ -33,6 +35,7 @@ export const DEFAULT_PREFS: Preferences = {
   dietary_restrictions: [],
   excluded_ingredients: [],
   free_staples: [],
+  persona_style: "weissman",
   onboarded: false,
 };
 
@@ -55,6 +58,7 @@ export async function getPreferences(
     dietary_restrictions: (data.dietary_restrictions ?? []) as string[],
     excluded_ingredients: (data.excluded_ingredients ?? []) as string[],
     free_staples: (data.free_staples ?? []) as string[],
+    persona_style: (data.persona_style ?? "weissman") as string,
     onboarded: !!data.onboarded,
   };
 }
@@ -71,6 +75,7 @@ export interface PreferenceUpdate {
   dietary_restrictions?: string[];
   excluded_ingredients?: string[];
   free_staples?: string[];
+  persona_style?: string;
 }
 
 export async function updatePreferences(
@@ -94,6 +99,7 @@ export async function updatePreferences(
     next.excluded_ingredients = patch.excluded_ingredients;
   }
   if (patch.free_staples !== undefined) next.free_staples = patch.free_staples;
+  if (patch.persona_style !== undefined) next.persona_style = patch.persona_style;
 
   const { error } = await db.from("household_preferences").upsert(
     {
@@ -106,6 +112,7 @@ export async function updatePreferences(
       dietary_restrictions: next.dietary_restrictions,
       excluded_ingredients: next.excluded_ingredients,
       free_staples: next.free_staples,
+      persona_style: next.persona_style,
       onboarded: true,
       updated_at: new Date().toISOString(),
     },
@@ -123,6 +130,7 @@ export interface HouseholdDescription {
   mealsPerWeek: number;
   weeklyBudget: number | null;
   freeStaples: string[]; // ingredients the household already has (off the list)
+  personaStyle: string; // chef voice: weissman | neutral | warm
 }
 
 const WEEKS_PER_MONTH = 4.345;
@@ -183,6 +191,7 @@ export function describeHousehold(p: Preferences): HouseholdDescription {
     mealsPerWeek: p.meals_per_week,
     weeklyBudget,
     freeStaples: p.free_staples,
+    personaStyle: p.persona_style,
   };
 }
 

@@ -32,12 +32,21 @@ const lockButton = (planId: string): InlineKeyboard => ({
   inline_keyboard: [[{ text: "✅ Lock the week", callback_data: `l:${planId}` }]],
 });
 
-const PLANNER_MODEL = "claude-sonnet-4-6"; // SPEC §9.1
+const PLANNER_MODEL = Deno.env.get("SOUS_PLANNER_MODEL") ?? "claude-sonnet-4-6";
 
+// Known cuisines get a nicer emoji/label; anything else falls back gracefully
+// (title-cased tag + a neutral plate) so the catalog isn't capped at these.
 const CUISINE_EMOJI: Record<string, string> = {
   mexican: "🌮",
   asian: "🍜",
   italian: "🍝",
+  indian: "🍛",
+  mediterranean: "🫒",
+  korean: "🍲",
+  thai: "🍚",
+  japanese: "🍱",
+  american: "🍔",
+  french: "🥖",
   other: "🍽️",
 };
 const CUISINE_LABEL: Record<string, string> = {
@@ -46,6 +55,14 @@ const CUISINE_LABEL: Record<string, string> = {
   italian: "Italian",
   other: "Other",
 };
+
+function cuisineLabel(tag: string): string {
+  return CUISINE_LABEL[tag] ??
+    tag.replace(/(^|[\s_-])([a-z])/g, (_, sep, ch) => sep + ch.toUpperCase());
+}
+function cuisineEmoji(tag: string): string {
+  return CUISINE_EMOJI[tag] ?? "🍽️";
+}
 // Up to 7 dinners; the household picks how many (meals_per_week). The first N
 // weekdays are used. Mon–Thu are "weeknights" (≤45 min); Fri/Sat/Sun can stretch.
 export const DAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
@@ -535,7 +552,7 @@ function swapSystem(
     .map((c) => {
       const rating = c.avg_rating != null ? `rated ${c.avg_rating}/5` : "unrated";
       const tags = c.ingredients?.length ? ` | ${c.ingredients.join(", ")}` : "";
-      return `- ${c.id} | ${CUISINE_LABEL[c.cuisine_tag] ?? c.cuisine_tag} | ${c.time_minutes}min | ${rating} | ${c.title}${tags}`;
+      return `- ${c.id} | ${cuisineLabel(c.cuisine_tag)} | ${c.time_minutes}min | ${rating} | ${c.title}${tags}`;
     })
     .join("\n");
   const req = (request ?? "").trim();
@@ -969,7 +986,7 @@ ${desc.context}`,
     messages: [{
       role: "user",
       content:
-        `Dish: ${recipe.title} (${CUISINE_LABEL[recipe.cuisine_tag] ?? recipe.cuisine_tag}, ~${recipe.time_minutes} min)\n` +
+        `Dish: ${recipe.title} (${cuisineLabel(recipe.cuisine_tag)}, ~${recipe.time_minutes} min)\n` +
         `Description: ${intro.trim()}\n` +
         `Current ingredients:\n${curList}\n\n` +
         `Requested change: "${change}"\n\nApply it and call apply_customization.`,
@@ -1235,7 +1252,7 @@ Plain text only, no markdown bold/headers beyond the literal words METHOD and TI
     messages: [{
       role: "user",
       content:
-        `Dish: ${recipe.title} (${CUISINE_LABEL[recipe.cuisine_tag] ?? recipe.cuisine_tag}, ~${recipe.time_minutes} min)\n` +
+        `Dish: ${recipe.title} (${cuisineLabel(recipe.cuisine_tag)}, ~${recipe.time_minutes} min)\n` +
         `One-liner: ${intro.trim()}\n\n` +
         `Ingredients on hand (sized for this household):\n${ingredientLines}\n\n` +
         `Terse steps to expand:\n${terseSteps || "(none given — write the method from scratch)"}`,
@@ -1244,12 +1261,12 @@ Plain text only, no markdown bold/headers beyond the literal words METHOD and TI
   });
 
   const [methodBlock, tipsBlock] = splitMethodTips(text);
-  const emoji = CUISINE_EMOJI[recipe.cuisine_tag] ?? "🍽️";
+  const emoji = cuisineEmoji(recipe.cuisine_tag);
 
   const lines: string[] = [];
   lines.push(`${emoji} <b>${esc(recipe.title)} — full recipe</b>`);
   lines.push(
-    `<i>${esc(CUISINE_LABEL[recipe.cuisine_tag] ?? "Other")} · ${recipe.time_minutes} min · ${esc(desc.serving)}</i>`,
+    `<i>${esc(cuisineLabel(recipe.cuisine_tag))} · ${recipe.time_minutes} min · ${esc(desc.serving)}</i>`,
   );
   lines.push("");
   lines.push(`🧾 <b>Ingredients</b>`);
@@ -1311,8 +1328,8 @@ function renderCard(
   desc: HouseholdDescription,
 ): string {
   const cand = c.cand;
-  const emoji = CUISINE_EMOJI[cand.cuisine_tag] ?? "🍽️";
-  const cuisine = CUISINE_LABEL[cand.cuisine_tag] ?? "Other";
+  const emoji = cuisineEmoji(cand.cuisine_tag);
+  const cuisine = cuisineLabel(cand.cuisine_tag);
   const stars = cand.avg_rating != null
     ? `  ${"★".repeat(Math.round(cand.avg_rating))}`
     : "";
@@ -1450,7 +1467,7 @@ function plannerSystem(
       const rating = c.avg_rating != null
         ? `rated ${c.avg_rating}/5 (${c.rating_count})`
         : "unrated";
-      return `- ${c.id} | ${CUISINE_LABEL[c.cuisine_tag] ?? c.cuisine_tag} | ${c.time_minutes}min | ${rating} | ${c.title} | ingredients: ${c.ingredients.join(", ")}`;
+      return `- ${c.id} | ${cuisineLabel(c.cuisine_tag)} | ${c.time_minutes}min | ${rating} | ${c.title} | ingredients: ${c.ingredients.join(", ")}`;
     })
     .join("\n");
   const budgetLine = desc.weeklyBudget

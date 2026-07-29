@@ -5,7 +5,7 @@
 
 import { completeRaw } from "./anthropic.ts";
 
-const INTENT_MODEL = "claude-haiku-4-5-20251001"; // SPEC §9.1
+const INTENT_MODEL = Deno.env.get("SOUS_INTENT_MODEL") ?? "claude-haiku-4-5-20251001";
 
 export type Intent = "plan" | "swap" | "lock" | "chat";
 export type Day = "mon" | "tue" | "wed" | "thu" | "fri";

@@ -7,7 +7,7 @@ import { completeRaw, normalize, type Msg } from "./anthropic.ts";
 import { sendMessage } from "./telegram.ts";
 import { SOUS_VOICE } from "./persona.ts";
 
-const MODEL = "claude-sonnet-4-6";
+const MODEL = Deno.env.get("SOUS_CHAT_MODEL") ?? "claude-sonnet-4-6";
 
 const ONBOARDING_SYSTEM = SOUS_VOICE + `
 
