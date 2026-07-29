@@ -1,7 +1,7 @@
 {
   "tasks": {
     "check": "deno check supabase/functions/tg_webhook/index.ts supabase/functions/orchestrator/index.ts supabase/functions/kickoff_week/index.ts supabase/functions/send_list/index.ts",
-    "test": "deno test supabase/functions/",
+    "test": "deno test --allow-env supabase/functions/",
     "fmt": "deno fmt supabase/functions/",
     "lint": "deno lint supabase/functions/"
   },

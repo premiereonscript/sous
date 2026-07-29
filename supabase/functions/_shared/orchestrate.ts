@@ -158,6 +158,12 @@ const TOOLS = [
           enum: ["imperial", "metric"],
           description: "measurement units for recipes + shopping list ('use metric')",
         },
+        shopping_sources: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "FULL replacement list of shopping-list section labels, in order, e.g. ['Grocery'] or ['Farmers Market','Grocery']. Use for 'I also shop a farmers market' or 'I just use one store'.",
+        },
       },
     },
   },
@@ -488,7 +494,9 @@ async function applyPreferenceUpdate(
       .map((k) => ({ age_months: Math.max(0, Math.min(215, Math.round(Number(k?.age_months) || 0))) }))
       .filter((k) => Number.isFinite(k.age_months)) as Kid[];
   }
-  for (const field of ["dietary_restrictions", "excluded_ingredients", "free_staples"] as const) {
+  for (
+    const field of ["dietary_restrictions", "excluded_ingredients", "free_staples", "shopping_sources"] as const
+  ) {
     if (Array.isArray(input[field])) {
       patch[field] = (input[field] as unknown[]).map((c) => String(c)).filter(Boolean);
     }

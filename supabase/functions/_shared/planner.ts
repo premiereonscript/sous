@@ -57,9 +57,10 @@ const CUISINE_LABEL: Record<string, string> = {
   other: "Other",
 };
 
-function cuisineLabel(tag: string): string {
+export function cuisineLabel(tag: string): string {
   return CUISINE_LABEL[tag] ??
-    tag.replace(/(^|[\s_-])([a-z])/g, (_, sep, ch) => sep + ch.toUpperCase());
+    tag.replace(/[_-]+/g, " ")
+      .replace(/(^|\s)([a-z])/g, (_, sep, ch) => sep + ch.toUpperCase());
 }
 function cuisineEmoji(tag: string): string {
   return CUISINE_EMOJI[tag] ?? "🍽️";
@@ -279,7 +280,7 @@ export async function proposePlan(conversationId: string): Promise<void> {
     p_plan_id: plan.id,
   });
   const listMsgId = await post(
-    renderShoppingList(weekOf, (listRows ?? []) as ShoppingRow[], desc.freeStaples),
+    renderShoppingList(weekOf, (listRows ?? []) as ShoppingRow[], desc.freeStaples, desc.shoppingSources),
   );
 
   // Lock prompt, with the button.
@@ -467,7 +468,7 @@ export async function swapMeal(
       botToken,
       convo.telegram_chat_id,
       listMsgId,
-      renderShoppingList(plan.week_of, (listRows ?? []) as ShoppingRow[], desc.freeStaples),
+      renderShoppingList(plan.week_of, (listRows ?? []) as ShoppingRow[], desc.freeStaples, desc.shoppingSources),
       "HTML",
     );
   }
@@ -508,7 +509,7 @@ export async function lockPlan(
   const { data: listRows } = await db.rpc("generate_shopping_list", {
     p_plan_id: planId,
   });
-  const { free_staples } = await getPreferences(db, convo.household_id);
+  const { free_staples, shopping_sources } = await getPreferences(db, convo.household_id);
   const payload = convo.state_payload as {
     shopping_msg_id?: number;
     lock_msg_id?: number;
@@ -518,7 +519,7 @@ export async function lockPlan(
       botToken,
       convo.telegram_chat_id,
       payload.shopping_msg_id,
-      renderShoppingList(plan.week_of, (listRows ?? []) as ShoppingRow[], free_staples),
+      renderShoppingList(plan.week_of, (listRows ?? []) as ShoppingRow[], free_staples, shopping_sources),
       "HTML",
     );
   }
@@ -819,7 +820,7 @@ export async function sendCurrentPlan(conversationId: string): Promise<boolean> 
   const { data: listRows } = await db.rpc("generate_shopping_list", {
     p_plan_id: convo.active_plan_id,
   });
-  await post(renderShoppingList(plan?.week_of ?? firstDay, (listRows ?? []) as ShoppingRow[], desc.freeStaples));
+  await post(renderShoppingList(plan?.week_of ?? firstDay, (listRows ?? []) as ShoppingRow[], desc.freeStaples, desc.shoppingSources));
 
   if (plan?.status !== "locked") {
     await post("Looks right? Lock it in for the week 👇", lockButton(convo.active_plan_id));
@@ -855,12 +856,13 @@ export async function sendShoppingList(conversationId: string): Promise<boolean>
   const { data: listRows } = await db.rpc("generate_shopping_list", {
     p_plan_id: convo.active_plan_id,
   });
-  const { free_staples } = await getPreferences(db, convo.household_id);
+  const { free_staples, shopping_sources } = await getPreferences(db, convo.household_id);
 
   const text = renderShoppingList(
     plan?.week_of ?? "",
     (listRows ?? []) as ShoppingRow[],
     free_staples,
+    shopping_sources,
   );
   await db.from("messages").insert({
     conversation_id: conversationId,
@@ -1148,7 +1150,7 @@ ${desc.context}`,
       botToken,
       convo.telegram_chat_id,
       listMsgId,
-      renderShoppingList(plan.week_of, (listRows ?? []) as ShoppingRow[], desc.freeStaples),
+      renderShoppingList(plan.week_of, (listRows ?? []) as ShoppingRow[], desc.freeStaples, desc.shoppingSources),
       "HTML",
     );
   }
@@ -1402,28 +1404,36 @@ function formatSteps(steps: string): string {
     .join("\n");
 }
 
-function renderShoppingList(
+export function renderShoppingList(
   weekOf: string,
   rows: ShoppingRow[],
   freeStaples: string[] = [],
+  sources: string[] = ["Grocery"],
 ): string {
   const line = (r: ShoppingRow) =>
     `⬜ ${esc(r.ingredient)} — <b>${trimNum(r.quantity)} ${esc(r.unit)}</b>`;
   const section = (rs: ShoppingRow[]) =>
     rs.length ? rs.map(line).join("\n") : "<i>(nothing)</i>";
+  const marketish = (s: string) => /farmer|market/i.test(s);
 
-  const market = rows.filter((r) => r.source === "farmers_market");
-  const grocery = rows.filter((r) => r.source === "grocery");
-
-  const out = [
-    `🛒 <b>Shopping list · week of ${esc(fmt(weekOf))}</b>`,
-    "",
-    "🧺 <b>Farmers Market</b>",
-    section(market),
-    "",
-    "🏬 <b>Grocery</b>",
-    section(grocery),
-  ];
+  const out = [`🛒 <b>Shopping list · week of ${esc(fmt(weekOf))}</b>`, ""];
+  if (sources.length <= 1) {
+    // Single store (the default): one bucket, everything in it.
+    out.push(`🏬 <b>${esc(sources[0] ?? "Grocery")}</b>`, section(rows));
+  } else {
+    // Split by ingredient source_hint into a market-like label and the rest.
+    const marketLabel = sources.find(marketish) ?? sources[0];
+    const groceryLabel = sources.find((s) => !marketish(s)) ?? sources[1] ?? sources[0];
+    const market = rows.filter((r) => r.source === "farmers_market");
+    const grocery = rows.filter((r) => r.source !== "farmers_market");
+    out.push(
+      `🧺 <b>${esc(marketLabel)}</b>`,
+      section(market),
+      "",
+      `🏬 <b>${esc(groceryLabel)}</b>`,
+      section(grocery),
+    );
+  }
   // Only tell them what was skipped when they've actually said they have it.
   if (freeStaples.length) {
     out.push("", `✅ <i>Skipped (you have): ${esc(freeStaples.join(", "))}</i>`);

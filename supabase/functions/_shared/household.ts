@@ -28,6 +28,9 @@ export interface Preferences {
   free_staples: string[];
   // Chef voice: "weissman" (default), "neutral", or "warm".
   persona_style: string;
+  // Shopping-list section labels, in order. Default a single "Grocery" bucket;
+  // a household that also shops a market uses ["Farmers Market","Grocery"].
+  shopping_sources: string[];
   // Planning rules (were hardcoded to the author's Mon–Thu ≤45-min schedule).
   weeknight_cap_minutes: number;
   weeknight_days: string[];
@@ -49,6 +52,7 @@ export const DEFAULT_PREFS: Preferences = {
   excluded_ingredients: [],
   free_staples: [],
   persona_style: "weissman",
+  shopping_sources: ["Grocery"],
   weeknight_cap_minutes: 45,
   weeknight_days: ["mon", "tue", "wed", "thu"],
   plan_days: null,
@@ -79,6 +83,7 @@ export async function getPreferences(
     excluded_ingredients: (data.excluded_ingredients ?? []) as string[],
     free_staples: (data.free_staples ?? []) as string[],
     persona_style: (data.persona_style ?? "weissman") as string,
+    shopping_sources: (data.shopping_sources ?? ["Grocery"]) as string[],
     weeknight_cap_minutes: (data.weeknight_cap_minutes ?? 45) as number,
     weeknight_days: (data.weeknight_days ?? ["mon", "tue", "wed", "thu"]) as string[],
     plan_days: (data.plan_days ?? null) as string[] | null,
@@ -103,6 +108,7 @@ export interface PreferenceUpdate {
   currency?: string;
   unit_system?: string;
   locale?: string;
+  shopping_sources?: string[];
 }
 
 export async function updatePreferences(
@@ -130,6 +136,7 @@ export async function updatePreferences(
   if (patch.currency !== undefined) next.currency = patch.currency;
   if (patch.unit_system !== undefined) next.unit_system = patch.unit_system;
   if (patch.locale !== undefined) next.locale = patch.locale;
+  if (patch.shopping_sources !== undefined) next.shopping_sources = patch.shopping_sources;
 
   const { error } = await db.from("household_preferences").upsert(
     {
@@ -146,6 +153,7 @@ export async function updatePreferences(
       excluded_ingredients: next.excluded_ingredients,
       free_staples: next.free_staples,
       persona_style: next.persona_style,
+      shopping_sources: next.shopping_sources,
       onboarded: true,
       updated_at: new Date().toISOString(),
     },
@@ -171,6 +179,7 @@ export interface HouseholdDescription {
   weeknightDays: string[];
   planDays: string[] | null;
   avoidConsecutiveCuisine: boolean;
+  shoppingSources: string[];
 }
 
 const WEEKS_PER_MONTH = 4.345;
@@ -257,6 +266,7 @@ export function describeHousehold(p: Preferences): HouseholdDescription {
     weeknightDays: p.weeknight_days,
     planDays: p.plan_days,
     avoidConsecutiveCuisine: p.avoid_consecutive_cuisine,
+    shoppingSources: p.shopping_sources,
   };
 }
 
