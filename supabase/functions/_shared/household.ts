@@ -12,6 +12,10 @@ export interface Preferences {
   meals_per_week: number;
   monthly_budget_usd: number | null;
   cuisines: string[];
+  // Ingredient names the household already has / gets for free, so they're kept
+  // off the shopping list (e.g. eggs for a household with backyard chickens).
+  // Empty by default — no assumption that anyone has a free source.
+  free_staples: string[];
   onboarded: boolean;
 }
 
@@ -21,6 +25,7 @@ export const DEFAULT_PREFS: Preferences = {
   meals_per_week: 5,
   monthly_budget_usd: null,
   cuisines: [],
+  free_staples: [],
   onboarded: false,
 };
 
@@ -40,6 +45,7 @@ export async function getPreferences(
     meals_per_week: data.meals_per_week ?? 5,
     monthly_budget_usd: data.monthly_budget_usd ?? null,
     cuisines: (data.cuisines ?? []) as string[],
+    free_staples: (data.free_staples ?? []) as string[],
     onboarded: !!data.onboarded,
   };
 }
@@ -94,6 +100,7 @@ export interface HouseholdDescription {
   hasKids: boolean;
   mealsPerWeek: number;
   weeklyBudget: number | null;
+  freeStaples: string[]; // ingredients the household already has (off the list)
 }
 
 const WEEKS_PER_MONTH = 4.345;
@@ -121,6 +128,11 @@ export function describeHousehold(p: Preferences): HouseholdDescription {
   if (p.cuisines.length) {
     lines.push(`- Cuisines they like: ${joinList(p.cuisines)}.`);
   }
+  if (p.free_staples.length) {
+    lines.push(
+      `- Already have (don't add to the shopping list, a mild cost plus): ${joinList(p.free_staples)}.`,
+    );
+  }
 
   const safety: string[] = [];
   if (hasBaby) {
@@ -142,6 +154,7 @@ export function describeHousehold(p: Preferences): HouseholdDescription {
     hasKids,
     mealsPerWeek: p.meals_per_week,
     weeklyBudget,
+    freeStaples: p.free_staples,
   };
 }
 

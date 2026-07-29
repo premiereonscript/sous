@@ -261,7 +261,7 @@ export async function proposePlan(conversationId: string): Promise<void> {
     p_plan_id: plan.id,
   });
   const listMsgId = await post(
-    renderShoppingList(weekOf, (listRows ?? []) as ShoppingRow[]),
+    renderShoppingList(weekOf, (listRows ?? []) as ShoppingRow[], desc.freeStaples),
   );
 
   // Lock prompt, with the button.
@@ -448,7 +448,7 @@ export async function swapMeal(
       botToken,
       convo.telegram_chat_id,
       listMsgId,
-      renderShoppingList(plan.week_of, (listRows ?? []) as ShoppingRow[]),
+      renderShoppingList(plan.week_of, (listRows ?? []) as ShoppingRow[], desc.freeStaples),
       "HTML",
     );
   }
@@ -470,7 +470,7 @@ export async function lockPlan(
 
   const { data: convo } = await db
     .from("conversations")
-    .select("id, telegram_chat_id, state_payload")
+    .select("id, telegram_chat_id, state_payload, household_id")
     .eq("id", conversationId)
     .maybeSingle();
   if (!convo) return;
@@ -489,6 +489,7 @@ export async function lockPlan(
   const { data: listRows } = await db.rpc("generate_shopping_list", {
     p_plan_id: planId,
   });
+  const { free_staples } = await getPreferences(db, convo.household_id);
   const payload = convo.state_payload as {
     shopping_msg_id?: number;
     lock_msg_id?: number;
@@ -498,7 +499,7 @@ export async function lockPlan(
       botToken,
       convo.telegram_chat_id,
       payload.shopping_msg_id,
-      renderShoppingList(plan.week_of, (listRows ?? []) as ShoppingRow[]),
+      renderShoppingList(plan.week_of, (listRows ?? []) as ShoppingRow[], free_staples),
       "HTML",
     );
   }
@@ -785,7 +786,7 @@ export async function sendCurrentPlan(conversationId: string): Promise<boolean> 
   const { data: listRows } = await db.rpc("generate_shopping_list", {
     p_plan_id: convo.active_plan_id,
   });
-  await post(renderShoppingList(plan?.week_of ?? firstDay, (listRows ?? []) as ShoppingRow[]));
+  await post(renderShoppingList(plan?.week_of ?? firstDay, (listRows ?? []) as ShoppingRow[], desc.freeStaples));
 
   if (plan?.status !== "locked") {
     await post("Looks right? Lock it in for the week 👇", lockButton(convo.active_plan_id));
@@ -801,7 +802,7 @@ export async function sendShoppingList(conversationId: string): Promise<boolean>
   const botToken = Deno.env.get("TELEGRAM_BOT_TOKEN")!;
   const { data: convo } = await db
     .from("conversations")
-    .select("active_plan_id, telegram_chat_id")
+    .select("active_plan_id, telegram_chat_id, household_id")
     .eq("id", conversationId)
     .maybeSingle();
   if (!convo?.active_plan_id) {
@@ -821,10 +822,12 @@ export async function sendShoppingList(conversationId: string): Promise<boolean>
   const { data: listRows } = await db.rpc("generate_shopping_list", {
     p_plan_id: convo.active_plan_id,
   });
+  const { free_staples } = await getPreferences(db, convo.household_id);
 
   const text = renderShoppingList(
     plan?.week_of ?? "",
     (listRows ?? []) as ShoppingRow[],
+    free_staples,
   );
   await db.from("messages").insert({
     conversation_id: conversationId,
@@ -1112,7 +1115,7 @@ ${desc.context}`,
       botToken,
       convo.telegram_chat_id,
       listMsgId,
-      renderShoppingList(plan.week_of, (listRows ?? []) as ShoppingRow[]),
+      renderShoppingList(plan.week_of, (listRows ?? []) as ShoppingRow[], desc.freeStaples),
       "HTML",
     );
   }
@@ -1343,9 +1346,13 @@ function renderCard(
     lines.push(desc.hasBaby ? "👶 <b>For the little ones</b>" : "👶 <b>For the kids</b>");
     lines.push(esc(kidNote.trim()));
   }
-  if (cand.ingredients?.includes("eggs")) {
+  // Note any ingredient the household already has on hand (free staples), if the
+  // dish uses one. Empty for households that haven't set any — no egg/coop
+  // assumption baked in.
+  const owned = (cand.ingredients ?? []).filter((i) => desc.freeStaples.includes(i));
+  if (owned.length) {
     lines.push("");
-    lines.push("🥚 <i>uses eggs from the coop</i>");
+    lines.push(`✅ <i>uses ${esc(owned.join(", "))} you already have</i>`);
   }
   return lines.join("\n");
 }
@@ -1362,7 +1369,11 @@ function formatSteps(steps: string): string {
     .join("\n");
 }
 
-function renderShoppingList(weekOf: string, rows: ShoppingRow[]): string {
+function renderShoppingList(
+  weekOf: string,
+  rows: ShoppingRow[],
+  freeStaples: string[] = [],
+): string {
   const line = (r: ShoppingRow) =>
     `⬜ ${esc(r.ingredient)} — <b>${trimNum(r.quantity)} ${esc(r.unit)}</b>`;
   const section = (rs: ShoppingRow[]) =>
@@ -1371,7 +1382,7 @@ function renderShoppingList(weekOf: string, rows: ShoppingRow[]): string {
   const market = rows.filter((r) => r.source === "farmers_market");
   const grocery = rows.filter((r) => r.source === "grocery");
 
-  return [
+  const out = [
     `🛒 <b>Shopping list · week of ${esc(fmt(weekOf))}</b>`,
     "",
     "🧺 <b>Farmers Market</b>",
@@ -1379,9 +1390,12 @@ function renderShoppingList(weekOf: string, rows: ShoppingRow[]): string {
     "",
     "🏬 <b>Grocery</b>",
     section(grocery),
-    "",
-    "🥚 <i>Skipped (you have them): eggs</i>",
-  ].join("\n");
+  ];
+  // Only tell them what was skipped when they've actually said they have it.
+  if (freeStaples.length) {
+    out.push("", `✅ <i>Skipped (you have): ${esc(freeStaples.join(", "))}</i>`);
+  }
+  return out.join("\n");
 }
 
 function trimNum(n: number): string {
@@ -1455,7 +1469,7 @@ Rules, in priority order:
 1. Exactly ${n} distinct recipes.
 2. Cuisine variety: lean into the cuisines they like; spread cuisines across the week (we'll order the days so none repeat back-to-back).
 3. Weeknight cook time: most picks should be ≤45 min active; one longer "project" dish is fine.
-4. Ingredient overlap for cost: prefer a set where several ingredients repeat across 2+ meals (${budgetLine}). Eggs are free (backyard chickens) — a mild plus.
+4. Ingredient overlap for cost: prefer a set where several ingredients repeat across 2+ meals (${budgetLine}). Anything the household already has (see above) is a mild cost plus.
 5. Include at least one leftover-friendly dinner.
 6. Kid-safe where relevant: picks carry a kid variant, and a plain soft portion can be pulled for any baby — favor dishes where that's easy.
 7. Ratings: strongly prefer dishes rated 4–5/5; avoid 1–2/5 unless variety forces it (down-weight, don't ban). Treat "unrated" as neutral and fine to try.
