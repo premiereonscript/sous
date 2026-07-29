@@ -28,6 +28,11 @@ export interface Preferences {
   free_staples: string[];
   // Chef voice: "weissman" (default), "neutral", or "warm".
   persona_style: string;
+  // Planning rules (were hardcoded to the author's Mon–Thu ≤45-min schedule).
+  weeknight_cap_minutes: number;
+  weeknight_days: string[];
+  plan_days: string[] | null; // explicit days to plan; null = first N weekdays
+  avoid_consecutive_cuisine: boolean;
   onboarded: boolean;
 }
 
@@ -44,6 +49,10 @@ export const DEFAULT_PREFS: Preferences = {
   excluded_ingredients: [],
   free_staples: [],
   persona_style: "weissman",
+  weeknight_cap_minutes: 45,
+  weeknight_days: ["mon", "tue", "wed", "thu"],
+  plan_days: null,
+  avoid_consecutive_cuisine: true,
   onboarded: false,
 };
 
@@ -70,6 +79,10 @@ export async function getPreferences(
     excluded_ingredients: (data.excluded_ingredients ?? []) as string[],
     free_staples: (data.free_staples ?? []) as string[],
     persona_style: (data.persona_style ?? "weissman") as string,
+    weeknight_cap_minutes: (data.weeknight_cap_minutes ?? 45) as number,
+    weeknight_days: (data.weeknight_days ?? ["mon", "tue", "wed", "thu"]) as string[],
+    plan_days: (data.plan_days ?? null) as string[] | null,
+    avoid_consecutive_cuisine: data.avoid_consecutive_cuisine ?? true,
     onboarded: !!data.onboarded,
   };
 }
@@ -154,6 +167,10 @@ export interface HouseholdDescription {
   currency: string;
   unitSystem: string;
   locale: string;
+  weeknightCapMinutes: number;
+  weeknightDays: string[];
+  planDays: string[] | null;
+  avoidConsecutiveCuisine: boolean;
 }
 
 const WEEKS_PER_MONTH = 4.345;
@@ -236,6 +253,10 @@ export function describeHousehold(p: Preferences): HouseholdDescription {
     currency: p.currency,
     unitSystem: p.unit_system,
     locale: p.locale,
+    weeknightCapMinutes: p.weeknight_cap_minutes,
+    weeknightDays: p.weeknight_days,
+    planDays: p.plan_days,
+    avoidConsecutiveCuisine: p.avoid_consecutive_cuisine,
   };
 }
 

@@ -64,8 +64,9 @@ function cuisineLabel(tag: string): string {
 function cuisineEmoji(tag: string): string {
   return CUISINE_EMOJI[tag] ?? "🍽️";
 }
-// Up to 7 dinners; the household picks how many (meals_per_week). The first N
-// weekdays are used. Mon–Thu are "weeknights" (≤45 min); Fri/Sat/Sun can stretch.
+// Up to 7 dinners; the household picks how many (meals_per_week) and which days
+// (plan_days). Which days count as weeknights + the time cap are per-household
+// (weeknight_days / weeknight_cap_minutes) — see describeHousehold.
 export const DAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
 export type DayKey = typeof DAY_KEYS[number];
 const DAY_LABEL: Record<DayKey, string> = {
@@ -77,7 +78,6 @@ const DAY_LABEL: Record<DayKey, string> = {
   sat: "Sat",
   sun: "Sun",
 };
-const WEEKNIGHTS = new Set<DayKey>(["mon", "tue", "wed", "thu"]);
 
 interface Candidate {
   id: string;
@@ -195,7 +195,7 @@ export async function proposePlan(conversationId: string): Promise<void> {
 
   // Deterministically arrange across Mon–Fri so the §8 hard rules always hold:
   // no cuisine on consecutive days, and >45 min dishes only on Friday.
-  const chosen = arrangeDays(picked);
+  const chosen = arrangeDays(picked, desc);
 
   // Write a 'proposed' plan (replace any existing draft for the week).
   const { data: plan } = await db
@@ -389,9 +389,10 @@ export async function swapMeal(
   if (idx >= 0 && idx < sorted.length - 1) {
     neighborCuisines.add(sorted[idx + 1].recipes?.cuisine_tag ?? "");
   }
-  const isWeeknight = ["mon", "tue", "wed", "thu"].includes(dayKey);
+  const isWeeknight = desc.weeknightDays.includes(dayKey);
   let pool = base.filter((c) =>
-    !neighborCuisines.has(c.cuisine_tag) && (!isWeeknight || c.time_minutes <= 45)
+    (!desc.avoidConsecutiveCuisine || !neighborCuisines.has(c.cuisine_tag)) &&
+    (!isWeeknight || c.time_minutes <= desc.weeknightCapMinutes)
   );
   if (pool.length === 0) pool = base;
 
@@ -405,7 +406,7 @@ export async function swapMeal(
   const { toolUses } = await completeRaw({
     apiKey: Deno.env.get("ANTHROPIC_API_KEY")!,
     model: PLANNER_MODEL,
-    system: swapSystem(pool, week, dayKey, req),
+    system: swapSystem(pool, week, dayKey, desc, req),
     messages: [{ role: "user", content: userAsk }],
     tools: [SWAP_MEAL_TOOL],
     toolChoice: { type: "tool", name: "swap_meal" },
@@ -542,6 +543,7 @@ function swapSystem(
   pool: Candidate[],
   weekItems: WeekItem[],
   dayKey: DayKey,
+  desc: HouseholdDescription,
   request?: string,
 ): string {
   const week = weekItems
@@ -568,21 +570,34 @@ ${week}
 Replacement candidates (pick one recipe_id, none are already in the week):
 ${menu}
 ${askBlock}
-Keep the week valid (SPEC §8): don't repeat a cuisine on consecutive days, keep ${DAY_LABEL[dayKey]} ≤45 min if it's Mon–Thu, favor 4–5/5 ratings, and keep variety. Then call swap_meal.`;
+Keep the week valid (SPEC §8): ${
+    desc.avoidConsecutiveCuisine ? "don't repeat a cuisine on consecutive days, " : ""
+  }${
+    desc.weeknightDays.includes(dayKey)
+      ? `keep ${DAY_LABEL[dayKey]} ≤${desc.weeknightCapMinutes} min (it's a weeknight), `
+      : ""
+  }favor 4–5/5 ratings, and keep variety. Then call swap_meal.`;
 }
 
 // Order the picked recipes into Mon..Fri so no two adjacent days share a
 // cuisine and any >45-min dish lands on Friday. Brute force (≤120 perms).
 function arrangeDays(
   picked: { cand: Candidate; why: string }[],
+  desc: HouseholdDescription,
 ): { day: DayKey; cand: Candidate; why: string }[] {
   const n = picked.length;
-  const days = DAY_KEYS.slice(0, n);
+  // Which days to plan: the household's explicit plan_days if set, else the
+  // first N weekdays. Weeknight cap + days + the cuisine rule are all per-household.
+  const source = (desc.planDays && desc.planDays.length ? desc.planDays : DAY_KEYS);
+  const days = source.slice(0, n) as DayKey[];
+  const weeknight = new Set(desc.weeknightDays);
+  const cap = desc.weeknightCapMinutes;
   const valid = (perm: number[]): boolean => {
     for (let i = 0; i < n; i++) {
       const cand = picked[perm[i]].cand;
-      if (WEEKNIGHTS.has(days[i]) && cand.time_minutes > 45) return false; // weeknight cap
-      if (i > 0 && picked[perm[i - 1]].cand.cuisine_tag === cand.cuisine_tag) {
+      if (weeknight.has(days[i]) && cand.time_minutes > cap) return false; // weeknight cap
+      if (desc.avoidConsecutiveCuisine && i > 0 &&
+          picked[perm[i - 1]].cand.cuisine_tag === cand.cuisine_tag) {
         return false; // no consecutive cuisine
       }
     }
@@ -981,7 +996,7 @@ export async function customizeMeal(
     apiKey: Deno.env.get("ANTHROPIC_API_KEY")!,
     model: PLANNER_MODEL,
     system:
-      `You customize a single recipe on request while keeping it the SAME dish (not a different recipe). Apply the change faithfully, rewrite the method so it uses/omits the changed ingredient, and report the ingredient delta with concrete names + real quantities sized for the household so the shopping list stays correct. Never output a vague ingredient like "meat" or "protein" — pick a specific one (Italian sausage, ground beef, chicken thighs). Respect the household's kids/baby (soft/unsalted portion pulled before spice; no honey under 1). Then call apply_customization.
+      `You customize a single recipe on request while keeping it the SAME dish (not a different recipe). Apply the change faithfully, rewrite the method so it uses/omits the changed ingredient, and report the ingredient delta with concrete names + real quantities sized for the household so the shopping list stays correct. Never output a vague ingredient like "meat" or "protein" — pick a specific one (Italian sausage, ground beef, chicken thighs).${desc.hasKids ? " Respect the household's kids/baby (soft/unsalted portion pulled before spice; no honey under 1)." : ""} Then call apply_customization.
 
 ${desc.context}`,
     messages: [{
@@ -1486,10 +1501,10 @@ ${menu}
 Rules, in priority order:
 1. Exactly ${n} distinct recipes.
 2. Cuisine variety: lean into the cuisines they like; spread cuisines across the week (we'll order the days so none repeat back-to-back).
-3. Weeknight cook time: most picks should be ≤45 min active; one longer "project" dish is fine.
+3. Weeknight cook time: most picks should be ≤${desc.weeknightCapMinutes} min active; one longer "project" dish is fine.
 4. Ingredient overlap for cost: prefer a set where several ingredients repeat across 2+ meals (${budgetLine}). Anything the household already has (see above) is a mild cost plus.
 5. Include at least one leftover-friendly dinner.
-6. Kid-safe where relevant: picks carry a kid variant, and a plain soft portion can be pulled for any baby — favor dishes where that's easy.
+6. ${desc.hasKids ? "Kid-safe where relevant: picks carry a kid variant, and a plain soft portion can be pulled for any baby — favor dishes where that's easy." : "Broad appeal: pick crowd-pleasers the whole household will enjoy."}
 7. Ratings: strongly prefer dishes rated 4–5/5; avoid 1–2/5 unless variety forces it (down-weight, don't ban). Treat "unrated" as neutral and fine to try.
 
 Then call propose_plan with ${n} items. Each "why" is one honest, specific line (variety, season, overlap, or a callback) — no marketing voice.`;
