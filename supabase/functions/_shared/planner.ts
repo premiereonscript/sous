@@ -1043,6 +1043,32 @@ ${desc.context}`,
     ? (call.input!.ingredient_changes as IngredientChange[])
     : [];
 
+  // Customize is the one path where an ingredient reaches a household's week
+  // without passing through candidate_recipes' hard filter. Until this check,
+  // the only thing between "add peanut sauce" and a peanut-allergic household
+  // was prompt text — and ROADMAP principle 3 says diet/allergy safety must
+  // never be LLM best-effort. Check every ADDED ingredient server-side against
+  // the same diet_rules the planning filter uses, and refuse the whole
+  // customization if any of them conflicts.
+  const additions = changes.filter((ch) =>
+    ch.action !== "remove" && String(ch.name ?? "").trim()
+  );
+  for (const ch of additions) {
+    const { data: conflict } = await db.rpc("diet_conflict", {
+      p_household_id: convo.household_id,
+      p_ingredient: String(ch.name).trim(),
+    });
+    if (conflict) {
+      console.warn(`customize: refused — ${conflict}`);
+      await sendMessage(
+        botToken,
+        convo.telegram_chat_id,
+        `can't do that one — ${conflict}. want me to swap in something else instead?`,
+      );
+      return null;
+    }
+  }
+
   // body_md = description, blank line, numbered steps (the card's format).
   const numbered = steps.map((s, i) => `${i + 1}. ${s.replace(/^\d+\.\s*/, "")}`).join("\n");
   const newBody = `${newDesc}\n\n${numbered}`;

@@ -9,7 +9,7 @@
 -- assertions are safe at any limit.
 
 begin;
-select plan(13);
+select plan(17);
 
 -- ---------------------------------------------------------------------------
 -- Fixtures: never-used recipes covering each filter path.
@@ -136,6 +136,25 @@ select is(
   (select count(*)::int from candidate_recipes(28, 1000, 'c0000000-0000-0000-0000-0000000000fw')
      where title = 'Carnitas Bowls'),
   0, 'vegan household never sees the pork carnitas');
+
+-- ---------------------------------------------------------------------------
+-- 14-17. diet_conflict guards the customize path — the one place an ingredient
+--    reaches a household's week without going through candidate_recipes.
+select ok(
+  diet_conflict('c0000000-0000-0000-0000-0000000000fk', 'test_cashew') is not null,
+  'no_nuts household: adding a tree-nut ingredient is refused');
+
+select ok(
+  diet_conflict('c0000000-0000-0000-0000-0000000000fp', 'test_cashew') is not null,
+  'a household excluding the word "nuts" is protected from a tree_nuts ingredient');
+
+select ok(
+  diet_conflict('c0000000-0000-0000-0000-0000000000fx', 'test_pork') is not null,
+  'an explicitly excluded ingredient is refused by name');
+
+select ok(
+  diet_conflict('c0000000-0000-0000-0000-0000000000fn', 'test_cashew') is null,
+  'a household with no restrictions can add anything');
 
 select * from finish();
 rollback;
