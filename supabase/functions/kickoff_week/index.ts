@@ -59,7 +59,10 @@ async function runKickoff(scheduled: boolean): Promise<void> {
       const p = prefById.get(h.id);
       const planDay = p?.plan_day ?? "fri";
       const planHour = p?.plan_hour ?? 18;
-      const { day, hour } = localDayHour(h.timezone ?? "America/Los_Angeles", now);
+      // households.timezone is NOT NULL with a UTC default and onboarding
+      // overwrites it with the household's real zone, so this fallback only
+      // covers a row written before that. It must not be one region's clock.
+      const { day, hour } = localDayHour(h.timezone ?? "UTC", now);
       if (day === planDay && hour === planHour) due.add(h.id);
     }
     if (due.size === 0) return; // nothing scheduled this hour

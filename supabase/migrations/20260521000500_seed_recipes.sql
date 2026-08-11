@@ -10,7 +10,7 @@
 --     separate recipe.
 --   * source_hint routes each ingredient to the Farmers Market vs Grocery list
 --     at lock time (SPEC §9.3). Fresh produce/herbs -> farmers_market; pantry,
---     canned, dairy, most proteins -> grocery. Eggs are is_free (the coop).
+--     canned, dairy, most proteins -> grocery.
 --   * Idempotent: re-running inserts nothing new. Safe to run after migrations.
 --
 -- Load:  psql "$DATABASE_URL" -f supabase/seeds/recipes.sql

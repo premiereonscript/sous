@@ -60,11 +60,53 @@ alter table ingredients         drop constraint if exists ingredients_source_hin
 alter table shopping_list_items drop constraint if exists shopping_list_items_source_check;  -- T6: any store/source
 
 -- ---------------------------------------------------------------------------
+-- Neutral default timezone.
+--
+-- 20260521000100 defaulted households.timezone to 'America/Los_Angeles' — one
+-- region's clock for every deploy on earth. Onboarding now asks where the
+-- household lives and writes the real zone, so this default only covers the gap
+-- before that answer arrives. UTC is the honest placeholder.
+alter table households alter column timezone set default 'UTC';
+
+-- ---------------------------------------------------------------------------
 -- Preserve the live instance (ROADMAP principle 1).
--- At migrate time the only household_preferences rows that can exist are on the
--- author's already-deployed database (fresh clones have none yet). Pin them to
--- the original behavior so the running bot is unchanged; new households created
--- later fall through to the generic defaults above.
-update household_preferences
-   set free_staples     = array['eggs'],
-       shopping_sources = array['Farmers Market','Grocery'];
+--
+-- The author's deployed database has one household that predates all of this
+-- and must keep behaving exactly as before: eggs off the shopping list (they
+-- keep chickens) and the farmers-market/grocery split.
+--
+-- This MUST NOT touch anyone else. An earlier draft ran a bare
+--   update household_preferences set free_staples = array['eggs'], ...
+-- with no WHERE, justified by "on a fresh clone no rows exist yet". That holds
+-- for a clone, and fails for the realistic case: a public user deploys,
+-- onboards their household, then pulls a later release and runs `db push` —
+-- and silently inherits someone else's kitchen, losing eggs from their list.
+--
+-- So gate on something only the pre-generalization instance can satisfy: the
+-- household predates this work. Sous was private until this branch, so no
+-- public deploy can have created a household before the cutoff, while the
+-- author's has existed for months. (ingredients.is_free is NOT a usable
+-- fingerprint here — it is true on every database seeded before
+-- 20260728000200, including a public user's, which is exactly the case this
+-- guard exists to protect.)
+--
+-- Written as insert-or-update because household_preferences rows are created
+-- lazily (getPreferences returns defaults when absent), so a plain UPDATE could
+-- silently match nothing and quietly change the live bot's behavior.
+insert into household_preferences (household_id, free_staples, shopping_sources)
+select h.id, array['eggs'], array['Farmers Market','Grocery']
+  from households h
+ where h.created_at < timestamptz '2026-07-28 00:00:00+00'
+    on conflict (household_id) do update
+   set free_staples     = excluded.free_staples,
+       shopping_sources = excluded.shopping_sources;
+
+-- ---------------------------------------------------------------------------
+-- Two seeded recipe descriptions asserted the author's backyard chickens
+-- ("Eggs from the coop.") and were rendered verbatim onto every household's
+-- recipe card. The seed files no longer contain the phrase, but the seeds use
+-- `on conflict do nothing`, so an already-seeded database keeps the old text
+-- until it is rewritten here.
+update recipes
+   set body_md = replace(body_md, ' Eggs from the coop.', '')
+ where body_md like '%Eggs from the coop.%';
