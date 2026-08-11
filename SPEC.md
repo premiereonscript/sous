@@ -480,14 +480,14 @@ household-scoped table; service-role bypasses, and that's the only caller.
 - **`ingredients`**: `name_canonical text unique`, `aliases text[]`, `unit_default text`, `source_hint text` (CHECK dropped, though the code still writes only `farmers_market` / `grocery` / `either`), `seasonal_months int[] null`, `allergens text[]` — the authoritative allergen data, cross-checked against `recipes.dietary_tags` by the hard filter. `is_free boolean` is **deprecated**, replaced by per-household `free_staples`.
 - **`recipes`**: `title`, `cuisine_tag text` (CHECK dropped — any cuisine), `body_md`, `time_minutes int`, `toddler_variant_notes text null`, `source text check (source in ('llm_generated','curated'))`, `last_used_on date null`, `times_used int default 0`, `base_servings int default 4` (the portion-scaling divisor), `dietary_tags text[]` (diet compatibility + `contains_*` markers), `is_variant boolean default false`, `parent_recipe_id null`, `embedding vector(1024) null`.
 - **`household_preferences`**: one row per household, PK `household_id`. Everything a kitchen differs on: `adults`, `kids jsonb`, `meals_per_week`, `monthly_budget_usd` + `currency`, `unit_system`, `locale`, `cuisines text[]`, `dietary_restrictions text[]`, `excluded_ingredients text[]`, `free_staples text[]`, `shopping_sources text[]`, `persona_style`, `weeknight_cap_minutes`, `weeknight_days text[]`, `plan_days text[] null`, `avoid_consecutive_cuisine`, `plan_day` + `plan_hour`, `onboarded`.
-- **`diet_rules`** / **`allergen_synonyms`**: the dietary vocabulary as data — which tag a diet key requires or forbids, which ingredient allergen it maps to, and the everyday words people type for them. Read by both `candidate_recipes` and `diet_conflict`, so the planning filter and the customize guard can never disagree.
+- **`diet_rules`** / **`allergen_synonyms`**: the dietary vocabulary as data — which tag a diet key requires or forbids, which ingredient allergen it maps to, and the everyday words people type for them. Read by both `candidate_recipes` and `diet_conflict`, so a diet key means the same thing to the planning filter and the customize guard. They do not enforce the same *amount* of it: the planner checks required tags, forbidden tags and allergens; the customize guard checks allergens and the avoid list only, so a diet with no allergen behind it (vegetarian, halal, no_pork) is prompt-enforced on that path.
 - **`recipe_ingredients`**: `recipe_id`, `ingredient_id`, `quantity numeric`, `unit text`, `optional boolean default false`. PK `(recipe_id, ingredient_id)`.
 - **`meal_plans`**: `household_id`, `week_of date` (Monday), `status text check (status in ('draft','proposed','locked','archived'))`, `locked_at timestamptz null`. Unique `(household_id, week_of)`.
 - **`meal_plan_items`**: `plan_id`, `day date`, `slot text check (slot in ('dinner'))` (v1 dinners only; widen later if lunches return), `recipe_id`, `toddler_variant_active boolean default true`, `position int`. Unique `(plan_id, day, slot)`.
 - **`feedback`**: `plan_item_id`, `rater_user_id`, `rating int check (rating between 1 and 5)`, `tags text[]`, `free_text text`. **v1 design, superseded** — the table exists but nothing writes it.
 - **`recipe_ratings`**: where ratings actually land. `household_id`, `recipe_id`, `rater_user_id`, `rating`, `note`, unique on `(recipe_id, rater_user_id)`. Read by `candidate_recipes` for the star line on each card.
 - **`recipe_exclusions`**: `household_id`, `recipe_id`, `reason text`, PK on both ids — a permanent "never make this again", stronger than a low rating. The per-household filtering pattern the dietary work was modelled on.
-- **`system_flags`**: per-household kill switch + daily cost guardrails (§10.4).
+- **`system_flags`**: per-household kill switch (`llm_enabled`) + daily call/token counters (§10.4). **Declared, not wired** — no code reads it yet, so flipping `llm_enabled` today does nothing.
 - **`shopping_lists`**: `plan_id unique`, `generated_at`.
 - **`shopping_list_items`**: `list_id`, `ingredient_id`, `quantity`, `unit`, `source text` (CHECK dropped) — still only `farmers_market` / `grocery`, derived from `ingredients.source_hint` plus seasonality. The household's `shopping_sources` labels are applied when the list is rendered, never stored here. `checked boolean default false`.
 - **`conversations`**: `household_id`, `telegram_chat_id bigint unique`, `active_plan_id`, `state text` (`idle`, `awaiting_feedback`, `proposing`, `editing`, `locked`), `state_payload jsonb`.
@@ -498,7 +498,8 @@ household-scoped table; service-role bypasses, and that's the only caller.
 **Weekly kickoff job** (Friday 6pm by default, in each household's own timezone):
 1. `pg_cron` calls Edge Function `kickoff_week` hourly; it acts only on the
    households due this local hour.
-2. Load household + last week's `meal_plan`.
+2. *(Designed, not built.)* Load household + last week's `meal_plan`. Today the
+   job loads only what `proposePlan` needs; no prior plan is read.
 3. *(Designed, not built.)* Haiku call: classify any unrated items into
    "liked / meh / hated" from free-text feedback collected during the week.
 4. *(Designed, not built.)* Sonnet call #1: summarize last week ("you ate 4 of
@@ -544,7 +545,10 @@ household-scoped table; service-role bypasses, and that's the only caller.
   cached weekly.
 - **Don't cache:** current draft plan, inbound user turn, tool results.
 
-Expected cache hit rate > 80% on Friday session messages.
+Expected cache hit rate > 80% on kickoff session messages.
+
+**Designed, not built** — no `cache_control` block is sent today; every call
+pays full input cost. Worth doing if usage grows.
 
 **Tools** (JSON schemas, all called by Sonnet unless noted):
 - `propose_plan({ week_of, items: [{day, slot, recipe_id_or_new, toddler_variant_active}] })`
@@ -553,8 +557,8 @@ Expected cache hit rate > 80% on Friday session messages.
 - `set_taste_pref({ user_id, dimension, value, confidence })`
 - `record_feedback({ plan_item_id, rater_user_id, rating, tags, free_text })`
 - `lock_plan({ plan_id })`
-- `generate_recipe({ constraints })` — **only this tool routes to Opus
-  4.7**; everything else stays on Sonnet.
+- `generate_recipe({ constraints })` — *(designed, not built)* the only tool
+  that would route to a heavier model; everything built today is Sonnet.
 
 **Recipe rotation (DB, not vibes):**
 ```sql
@@ -612,10 +616,13 @@ ingredient list — the variant is a preparation fork, not a separate recipe.
 
 ### 9.6 Idempotency, Retries, Failure Modes
 
-- **Friday job double-fire:** `meal_plans` has `unique(household_id,
-  week_of)`. The Edge Function does `insert ... on conflict do nothing
-  returning id`; if no row returned, exit. Telegram post is gated on the
-  insert succeeding.
+- **Kickoff double-fire:** `meal_plans` has `unique(household_id, week_of)`,
+  but `proposePlan` *upserts* into it and then replaces that plan's items, so
+  a second fire in the same hour **regenerates** the week rather than exiting.
+  Tolerable because the hourly tick only matches one local hour, and because
+  the DST fall-back repeat is the realistic case — but it is not idempotent,
+  and nothing is gated on the insert. Making it exit when a `proposed` plan
+  already exists for that week is a good contribution.
 - **Telegram down:** orchestrator always commits state to Postgres *before*
   attempting the Telegram send. On send failure, mark the outbound
   `message` row as un-sent and retry on next inbound or via a 5-minute
@@ -627,9 +634,11 @@ ingredient list — the variant is a preparation fork, not a separate recipe.
   return the error as a tool result and let Sonnet retry — cap at 2
   retries per turn, then post "I got confused, can you rephrase?" to the
   thread.
-- **Recipe references unknown ingredient:** `generate_recipe` resolves
-  ingredients against `ingredients.name_canonical` + `aliases`; unknowns
-  get inserted with `source_hint='either'` and flagged for review.
+- **Recipe references unknown ingredient:** the customize flow's
+  `resolveOrCreateIngredient` matches against `ingredients.name_canonical` +
+  `aliases`; unknowns are inserted with `source_hint='grocery'` and, notably,
+  **no `allergens`** — which is why `diet_conflict` cannot vouch for an
+  ingredient the catalog has never seen. Nothing is flagged for review yet.
 
 ### 9.7 Local Dev + Deploy
 

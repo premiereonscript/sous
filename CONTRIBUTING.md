@@ -6,7 +6,8 @@ your own kitchen, not a product you have to use as shipped.
 
 ## Running the whole thing locally
 
-You need [Deno](https://deno.land) and Docker (for the local Supabase stack).
+You need [Deno](https://deno.land), Docker (for the local Supabase stack), and
+the Supabase CLI (`brew install supabase/tap/supabase`).
 
 ```bash
 supabase db start            # applies every migration + seeds the catalog
@@ -79,13 +80,19 @@ that has already run them.
 
 ## Style
 
-- Deno defaults; `deno task lint` and `deno fmt` are the arbiters.
+- Deno defaults; `deno task lint` and `deno task fmt` are the arbiters. Both are
+  scoped to `supabase/functions/` on purpose — don't run bare `deno fmt` from
+  the repo root, it will reflow every Markdown file including the diagrams.
 - Comments explain **why**, not what. The repo leans on this heavily — if a
   line looks odd, the comment should say what would break without it.
 - Commit messages: what changed and why it mattered. Long is fine.
 
 ## Reporting a security issue
 
-Don't open a public issue. The threat model is in SPEC.md §10; the short version
-is that `TELEGRAM_ALLOWED_CHAT_IDS` is the entire authorization model, and every
-deploy is someone's own Supabase project holding their own keys.
+Don't open a public issue — use GitHub's **Report a vulnerability** button on
+this repo (Security → Advisories), which is private.
+
+The threat model is in SPEC.md §10. The short version: `TELEGRAM_ALLOWED_CHAT_IDS`
+is the entire authorization model, and every deploy is someone's own Supabase
+project holding their own keys — so the blast radius of most issues is one
+household, but a filter bypass affects everyone who pulls.

@@ -17,7 +17,9 @@ independently converged on the same hardcoded assumptions.
    deployment env var), with a sensible neutral default.
 3. **Server-enforced safety.** Dietary/allergy constraints are hard SQL filters
    on the candidate pool — never LLM best-effort. Copy the `recipe_exclusions`
-   pattern.
+   pattern. One exception exists today and is tracked in *Still open*: the
+   customize path enforces allergens and the avoid list, but not diets that
+   have no allergen behind them.
 4. **Every phase ends green.** `deno check` clean; docs updated for what shipped.
 
 ## Severity legend
@@ -117,6 +119,11 @@ because each is a failure mode worth re-checking against future changes:
 - **Fixed UI strings are English.** Locale drives replies, generated content,
   money and dates, but not the literal labels ("Shopping list") or the starter
   catalog.
+- **`diet_conflict` is narrower than the planning filter.** On the customize
+  path it blocks an added ingredient carrying a forbidden allergen or sitting
+  on the avoid list. A diet with no allergen behind it (vegetarian, halal,
+  no_pork) and an ingredient the catalog has never seen both fall through to
+  prompt enforcement. The planning pool itself is fully filtered.
 - **Thin vegan rotation.** The catalog carries 6 vegan mains against a 28-day
   reuse window, so a strictly vegan household gets one full week and then a
   shrinking one. More plant-based mains is the highest-value catalog

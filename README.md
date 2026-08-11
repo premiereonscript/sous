@@ -50,20 +50,20 @@ Everything is a conversation — no commands, buttons optional.
 ## How it works
 
 ```
-                        ┌─ orchestrate.ts ─ chat · rate · swap · customize
-Telegram ─webhook─> tg_webhook          exclude · lock · expand · prefs ──> Claude
-   ▲                    │   (in-process)                                   (Anthropic)
-   └───── replies ──────┘   └─ planner.ts ─── propose · swap · shopping list
-                        │
-                        ▼
-                Supabase Postgres ◄── pg_cron (hourly) ──> kickoff_week
-                        │
-                        └─ SQL triggers ──> send_list (resend list / plan)
+Telegram ──webhook──> tg_webhook ──┐
+   ▲                               │  in-process (EdgeRuntime.waitUntil)
+   └───────── replies ─────────────┤
+                                   ├──> orchestrate.ts ──┐  chat · rate · swap · prefs
+                                   ├──> planner.ts ──────┴─> Claude (Anthropic)
+                                   ▼
+                           Supabase Postgres <── pg_cron (hourly) ──> kickoff_week
+                                   │
+                                   └── SQL triggers ──> send_list (resend list / plan)
 ```
 
-`orchestrate.ts` and `planner.ts` run **inside** `tg_webhook` via
-`EdgeRuntime.waitUntil`, not over HTTP. The separate `orchestrator` function is
-a standalone entry point for the same code, useful for debugging.
+`orchestrate.ts` and `planner.ts` run **inside** `tg_webhook`, not over HTTP.
+The separate `orchestrator` Edge Function is a standalone entry point for the
+same code, useful for debugging; nothing in the repo calls it.
 
 - **Runtime:** TypeScript on Supabase Edge Functions (Deno)
 - **Data:** Supabase Postgres (RLS, pgvector-ready)
@@ -148,10 +148,11 @@ files. Onboarding asks the essentials; after that, tell Sous things like:
   Sixteen diets are enforced structurally in SQL: vegetarian, vegan,
   pescatarian, gluten_free, dairy_free, halal, kosher, and no_pork / no_beef /
   no_poultry / no_shellfish / no_fish / no_nuts / no_soy / no_egg / no_sesame.
-  Say something outside that list (*"low FODMAP"*, *"keto"*) and Sous keeps it
-  as an ingredient to avoid instead — still enforced, but by ingredient name
-  and allergen rather than by rule, so it's only as good as the catalog's
-  tagging.
+  Say something outside that list and Sous keeps it as a literal ingredient to
+  avoid, and tells you that's what it did. That works for a named food
+  (*"no duck"*); it does nothing for a diet with no single ingredient behind it
+  (*"keto"*, *"low FODMAP"*) — those you'll need to manage by excluding dishes
+  as they come up.
 - **How you shop** — one list by default. Say *"I also shop a farmers market"*
   and Sous splits produce into its own section, labelled however you like. The
   split keys off the words *market* or *farmer*; two arbitrary store names

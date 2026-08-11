@@ -26,9 +26,10 @@ Loads recent turns and the current week, then asks Sonnet for a reply as
 **Sous** (voice in `_shared/persona.ts`, chosen per household from
 `persona_style`). It is a small agent, not a one-shot chat: it can swap, plan
 or lock a week, permanently exclude a dish, expand a recipe, record a rating,
-and update household preferences. Shared core in `_shared/orchestrate.ts`, also
-callable as a standalone HTTP entry. JWT verification stays on (called with the
-service-role key).
+and update household preferences. The core lives in `_shared/orchestrate.ts` and
+runs in-process from `tg_webhook`; nothing in the repo calls this function over
+HTTP today. It exists so the same core can be driven with a service-role bearer
+for debugging, which is why JWT verification stays on.
 
 ## `kickoff_week` (hourly cron)
 

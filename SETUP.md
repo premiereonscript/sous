@@ -145,7 +145,7 @@ Message your bot (everything below is just chat — no commands or slashes):
   shopping list, tuned to your answers.
 - Tap **🔄 Swap** / **✅ Lock** on the cards, or just text it:
   - **"swap thursday for something vegetarian"** → a request-aware swap that
-    honors what you asked and keeps the week valid.
+    honors what you asked and keeps the week varied where the catalog allows.
   - **"add sausage to the pesto pasta"** / **"make thursday gluten-free"** →
     **customizes** that one dish (keeps the dinner, rewrites the recipe, updates
     the grocery list) instead of swapping it out.
