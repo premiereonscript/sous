@@ -203,6 +203,24 @@ export function isEnglish(locale: string): boolean {
   return /^en(-|$)/i.test(locale);
 }
 
+// Return a locale tag Intl will actually accept, or null if it can't be
+// salvaged. Models reach for "es_ES" (underscore) about as often as "es-ES",
+// and toLocaleDateString throws RangeError on the former — which, once the tag
+// is persisted, breaks every plan send from then on. Normalize on write.
+export function canonicalizeLocale(input: string): string | null {
+  const raw = input.trim();
+  if (!raw) return null;
+  for (const candidate of [raw, raw.replace(/_/g, "-")]) {
+    try {
+      const [canonical] = Intl.getCanonicalLocales(candidate);
+      if (canonical) return canonical;
+    } catch {
+      // try the next shape
+    }
+  }
+  return null;
+}
+
 // Human language name for a locale (e.g. "es-ES" -> "Spanish").
 export function languageName(locale: string): string {
   try {

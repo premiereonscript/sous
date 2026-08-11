@@ -1539,9 +1539,13 @@ function dayDate(weekOf: string, day: DayKey): string {
 function fmt(iso: string, locale = "en-US"): string {
   const [y, mo, da] = iso.split("-").map(Number);
   const d = new Date(Date.UTC(y, mo - 1, da));
-  return d.toLocaleDateString(locale, {
-    month: "short",
-    day: "numeric",
-    timeZone: "UTC",
-  });
+  const opts = { month: "short", day: "numeric", timeZone: "UTC" } as const;
+  // formatMoney and languageName both guard their Intl calls; this one did not,
+  // so a malformed locale already in the DB threw RangeError here and took out
+  // the whole plan send after the plan row had been written.
+  try {
+    return d.toLocaleDateString(locale, opts);
+  } catch {
+    return d.toLocaleDateString("en-US", opts);
+  }
 }

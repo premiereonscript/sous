@@ -13,11 +13,14 @@ import { completeRaw, type Msg, normalize } from "./anthropic.ts";
 import { sendMessage } from "./telegram.ts";
 import { sousSystem } from "./persona.ts";
 import {
+  canonicalizeLocale,
   describeHousehold,
   getPreferences,
   type Kid,
   updatePreferences,
 } from "./household.ts";
+import { DIET_KEYS, normalizeDiet } from "./diet.ts";
+import { normalizeTimezone } from "./schedule.ts";
 import {
   customizeMeal,
   DAY_KEYS,
@@ -97,7 +100,7 @@ const TOOLS = [
   {
     name: "update_preferences",
     description:
-      "Change the household's standing preferences (they persist and shape every future plan). Use for 'we like Thai now', 'bump us to 4 dinners a week', 'budget is $900/month', 'the baby is 11 months now', 'we went vegetarian', 'stop using peanuts — allergy', 'we have chickens now, skip eggs'. Only include the fields that changed; array fields are FULL replacements.",
+      "Change the household's standing preferences (they persist and shape every future plan). Use for 'we like Thai now', 'bump us to 4 dinners a week', 'budget is $900/month', 'the baby is 11 months now', 'we went vegetarian', 'stop using peanuts — allergy', 'we have chickens now, skip eggs', 'we moved to Berlin'. Only include the fields that changed; array fields are FULL replacements, so re-send existing values alongside new ones.",
     input_schema: {
       type: "object",
       properties: {
@@ -121,15 +124,8 @@ const TOOLS = [
         dietary_restrictions: {
           type: "array",
           description:
-            "FULL replacement list of canonical diet keys (hard-enforced). Allowed: vegetarian, vegan, pescatarian, gluten_free, dairy_free, halal, kosher, no_pork, no_beef, no_poultry, no_shellfish, no_fish, no_nuts, no_soy, no_egg",
-          items: {
-            type: "string",
-            enum: [
-              "vegetarian", "vegan", "pescatarian", "gluten_free", "dairy_free",
-              "halal", "kosher", "no_pork", "no_beef", "no_poultry",
-              "no_shellfish", "no_fish", "no_nuts", "no_soy", "no_egg",
-            ],
-          },
+            `FULL replacement list of canonical diet keys (hard-enforced). Allowed: ${DIET_KEYS.join(", ")}. Because this REPLACES the list, always include the restrictions they already have (shown in the household context above) alongside any new one — dropping one silently removes an allergy filter.`,
+          items: { type: "string", enum: [...DIET_KEYS] },
         },
         excluded_ingredients: {
           type: "array",
@@ -167,7 +163,12 @@ const TOOLS = [
         locale: {
           type: "string",
           description:
-            "BCP-47 locale, e.g. es-ES, fr-FR, de-DE, en-US — sets the reply language and date/number formatting. Use for 'talk to me in Spanish'.",
+            "BCP-47 locale with a HYPHEN, e.g. es-ES, fr-FR, de-DE, en-US — sets the reply language and date/number formatting. Use for 'talk to me in Spanish'.",
+        },
+        timezone: {
+          type: "string",
+          description:
+            "IANA timezone name, e.g. Europe/Berlin, America/Chicago. Sets which local hour the weekly kickoff fires at. Use for 'we moved to London' or 'the plan shows up at the wrong time'. Convert their city/region yourself; never ask for the raw string.",
         },
       },
     },
@@ -499,12 +500,26 @@ async function applyPreferenceUpdate(
       .map((k) => ({ age_months: Math.max(0, Math.min(215, Math.round(Number(k?.age_months) || 0))) }))
       .filter((k) => Number.isFinite(k.age_months)) as Kid[];
   }
-  for (
-    const field of ["dietary_restrictions", "excluded_ingredients", "free_staples", "shopping_sources"] as const
-  ) {
+  for (const field of ["free_staples", "shopping_sources"] as const) {
     if (Array.isArray(input[field])) {
       patch[field] = (input[field] as unknown[]).map((c) => String(c)).filter(Boolean);
     }
+  }
+  // Diet + allergy input goes through the same normalizer as onboarding: the
+  // tool enum is advisory, and an off-list key that reaches the DB silently
+  // filters nothing while the household is told it is enforced.
+  let unrecognizedDiet: string[] = [];
+  if (Array.isArray(input.dietary_restrictions) || Array.isArray(input.excluded_ingredients)) {
+    const norm = normalizeDiet(input.dietary_restrictions, input.excluded_ingredients);
+    if (Array.isArray(input.dietary_restrictions)) {
+      patch.dietary_restrictions = norm.dietary_restrictions;
+    }
+    // An unrecognized diet key becomes an ingredient exclusion, so the excluded
+    // list has to be written even when the model only sent restrictions.
+    if (Array.isArray(input.excluded_ingredients) || norm.unrecognized.length) {
+      patch.excluded_ingredients = norm.excluded_ingredients;
+    }
+    unrecognizedDiet = norm.unrecognized;
   }
   if (typeof input.persona_style === "string" &&
       ["weissman", "neutral", "warm"].includes(input.persona_style)) {
@@ -517,13 +532,36 @@ async function applyPreferenceUpdate(
       ["imperial", "metric"].includes(input.unit_system)) {
     patch.unit_system = input.unit_system;
   }
+  // Canonicalize rather than trust: planner's fmt() feeds this straight to
+  // toLocaleDateString, which throws RangeError on a tag like "es_ES" and takes
+  // out every subsequent plan send.
   if (typeof input.locale === "string" && input.locale.trim()) {
-    patch.locale = input.locale.trim();
+    const canonical = canonicalizeLocale(input.locale);
+    if (canonical) patch.locale = canonical;
   }
-  if (Object.keys(patch).length === 0) return "nothing to update";
+
+  // Timezone lives on households, not household_preferences.
+  let tzNote = "";
+  if (input.timezone !== undefined) {
+    const tz = normalizeTimezone(input.timezone);
+    if (tz) {
+      const { error } = await db.from("households").update({ timezone: tz }).eq("id", householdId);
+      if (error) console.error("timezone update failed", error);
+      else tzNote = `, timezone -> ${tz}`;
+    } else {
+      console.warn(`applyPreferenceUpdate: ignoring invalid timezone ${JSON.stringify(input.timezone)}`);
+    }
+  }
+
+  if (Object.keys(patch).length === 0) {
+    return tzNote ? `updated preferences (timezone)${tzNote}` : "nothing to update";
+  }
 
   await updatePreferences(db, householdId, patch);
-  return `updated preferences (${Object.keys(patch).join(", ")}) — future plans will use this`;
+  const warn = unrecognizedDiet.length
+    ? ` (note: "${unrecognizedDiet.join('", "')}" isn't a diet I enforce structurally — I kept it as an ingredient to always avoid, so tell them that plainly)`
+    : "";
+  return `updated preferences (${Object.keys(patch).join(", ")})${tzNote} — future plans will use this${warn}`;
 }
 
 // ---- context the agent reasons over --------------------------------------

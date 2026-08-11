@@ -6,8 +6,12 @@ import { dbClient } from "./db.ts";
 import { completeRaw, normalize, type Msg } from "./anthropic.ts";
 import { sendMessage } from "./telegram.ts";
 import { SOUS_VOICE } from "./persona.ts";
+import { DIET_KEYS, normalizeDiet } from "./diet.ts";
+import { normalizeTimezone } from "./schedule.ts";
 
 const MODEL = Deno.env.get("SOUS_CHAT_MODEL") ?? "claude-sonnet-4-6";
+
+const DIET_LIST = DIET_KEYS.join(", ");
 
 const ONBOARDING_SYSTEM = SOUS_VOICE + `
 
@@ -17,14 +21,15 @@ RIGHT NOW you're setting up a brand-new household — you don't know them yet, a
 3. How many dinners they want planned per week (1–7; most pick 5).
 4. Their monthly grocery budget (a dollar amount).
 5. What cuisines / kinds of food they love.
-6. Any dietary restrictions or allergies for ANYONE in the household — this one matters, ask it plainly (e.g. "anyone vegetarian, allergies, foods you avoid?"). Map their answer to save_setup's dietary_restrictions using ONLY these keys: vegetarian, vegan, pescatarian, gluten_free, dairy_free, halal, kosher, no_pork, no_beef, no_poultry, no_shellfish, no_fish, no_nuts, no_soy, no_egg. For a specific ingredient they avoid that isn't one of those keys (a named allergy or hard dislike), put the ingredient name in excluded_ingredients. If they have none, pass empty arrays — but you must still ask.
+6. Any dietary restrictions or allergies for ANYONE in the household — this one matters, ask it plainly (e.g. "anyone vegetarian, allergies, foods you avoid?"). Map their answer to save_setup's dietary_restrictions using ONLY these keys: ${DIET_LIST}. For a specific ingredient they avoid that isn't one of those keys (a named allergy or hard dislike), put the ingredient name in excluded_ingredients. If they have none, pass empty arrays — but you must still ask.
+7. Roughly where they live, so the weekly plan lands at a sensible local hour. Ask casually ("what city are you in?" / "what timezone are you in?") — you only need enough to pick an IANA timezone, and you must convert it yourself (e.g. "Berlin" -> Europe/Berlin, "Austin" -> America/Chicago, "EST" -> America/New_York). Never ask them for an IANA string.
 
-Open with a short, warm Sous-style hello + your first question or two. As soon as you have ALL SIX, call save_setup with structured values (convert kid ages to months). Do NOT call it early or guess — ask, especially about allergies. After it's saved, you'll be told; then hype them up and tell them to say "plan my week" when ready.`;
+Open with a short, warm Sous-style hello + your first question or two. As soon as you have ALL SEVEN, call save_setup with structured values (convert kid ages to months). Do NOT call it early or guess — ask, especially about allergies. After it's saved, you'll be told; then hype them up and tell them to say "plan my week" when ready.`;
 
 const SAVE_SETUP_TOOL = {
   name: "save_setup",
   description:
-    "Save the household's setup. Only call once you have ALL of: number of adults, every kid's age, dinners per week, monthly grocery budget, preferred cuisines, and dietary restrictions/allergies (ask even if the answer is none).",
+    "Save the household's setup. Only call once you have ALL of: number of adults, every kid's age, dinners per week, monthly grocery budget, preferred cuisines, dietary restrictions/allergies (ask even if the answer is none), and their timezone.",
   input_schema: {
     type: "object",
     properties: {
@@ -44,15 +49,8 @@ const SAVE_SETUP_TOOL = {
       dietary_restrictions: {
         type: "array",
         description:
-          "canonical diet keys the whole household needs honored; empty if none. Allowed: vegetarian, vegan, pescatarian, gluten_free, dairy_free, halal, kosher, no_pork, no_beef, no_poultry, no_shellfish, no_fish, no_nuts, no_soy, no_egg",
-        items: {
-          type: "string",
-          enum: [
-            "vegetarian", "vegan", "pescatarian", "gluten_free", "dairy_free",
-            "halal", "kosher", "no_pork", "no_beef", "no_poultry",
-            "no_shellfish", "no_fish", "no_nuts", "no_soy", "no_egg",
-          ],
-        },
+          `canonical diet keys the whole household needs honored; empty if none. Allowed: ${DIET_LIST}`,
+        items: { type: "string", enum: [...DIET_KEYS] },
       },
       excluded_ingredients: {
         type: "array",
@@ -60,10 +58,15 @@ const SAVE_SETUP_TOOL = {
           "specific ingredient names (or allergen words like 'peanuts') to always avoid, beyond the canonical diet keys; empty if none",
         items: { type: "string" },
       },
+      timezone: {
+        type: "string",
+        description:
+          "IANA timezone name you inferred from where they said they live, e.g. Europe/Berlin, America/Chicago, Asia/Tokyo. Never ask the household for this string — convert it from their city or region yourself.",
+      },
     },
     required: [
       "adults", "kids", "meals_per_week", "monthly_budget_usd", "cuisines",
-      "dietary_restrictions",
+      "dietary_restrictions", "timezone",
     ],
   },
 };
@@ -157,12 +160,21 @@ async function saveSetup(
   const cuisines = Array.isArray(input.cuisines)
     ? (input.cuisines as unknown[]).map((c) => String(c)).filter(Boolean)
     : [];
-  const dietary_restrictions = Array.isArray(input.dietary_restrictions)
-    ? (input.dietary_restrictions as unknown[]).map((c) => String(c)).filter(Boolean)
-    : [];
-  const excluded_ingredients = Array.isArray(input.excluded_ingredients)
-    ? (input.excluded_ingredients as unknown[]).map((c) => String(c)).filter(Boolean)
-    : [];
+  // The tool schema declares an enum, but the API does not enforce it — a model
+  // that writes "nut_free" instead of "no_nuts" would be persisted verbatim and
+  // then match nothing in the SQL filter, leaving the household believing an
+  // allergy is enforced when it is not. Normalize server-side; anything we
+  // can't map to a canonical key becomes an ingredient exclusion rather than
+  // being dropped.
+  const { dietary_restrictions, excluded_ingredients, unrecognized } = normalizeDiet(
+    input.dietary_restrictions,
+    input.excluded_ingredients,
+  );
+  if (unrecognized.length) {
+    console.warn(
+      `saveSetup: unrecognized diet keys kept as ingredient exclusions: ${unrecognized.join(", ")}`,
+    );
+  }
 
   const { error } = await db.from("household_preferences").upsert(
     {
@@ -180,6 +192,21 @@ async function saveSetup(
     { onConflict: "household_id" },
   );
   if (error) console.error("saveSetup failed", error);
+
+  // Timezone lives on households, not household_preferences, and drives which
+  // hour the weekly kickoff fires in (see kickoff_week + 20260728000500). Left
+  // unset it would fall back to the column default, which is one region's
+  // 6pm for everyone on earth.
+  const tz = normalizeTimezone(input.timezone);
+  if (tz) {
+    const { error: tzError } = await db
+      .from("households")
+      .update({ timezone: tz })
+      .eq("id", householdId);
+    if (tzError) console.error("saveSetup: timezone update failed", tzError);
+  } else {
+    console.warn(`saveSetup: ignoring invalid timezone ${JSON.stringify(input.timezone)}`);
+  }
 }
 
 function clampInt(v: unknown, lo: number, hi: number, dflt: number): number {
