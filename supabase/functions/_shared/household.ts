@@ -109,6 +109,13 @@ export interface PreferenceUpdate {
   unit_system?: string;
   locale?: string;
   shopping_sources?: string[];
+  // Planning rules (T9). These were readable but had no write path at all —
+  // not in this interface, not in the upsert, not in the update_preferences
+  // tool — while the README advertised changing them by chat.
+  weeknight_cap_minutes?: number;
+  weeknight_days?: string[];
+  plan_days?: string[] | null;
+  avoid_consecutive_cuisine?: boolean;
 }
 
 export async function updatePreferences(
@@ -137,6 +144,14 @@ export async function updatePreferences(
   if (patch.unit_system !== undefined) next.unit_system = patch.unit_system;
   if (patch.locale !== undefined) next.locale = patch.locale;
   if (patch.shopping_sources !== undefined) next.shopping_sources = patch.shopping_sources;
+  if (patch.weeknight_cap_minutes !== undefined) {
+    next.weeknight_cap_minutes = patch.weeknight_cap_minutes;
+  }
+  if (patch.weeknight_days !== undefined) next.weeknight_days = patch.weeknight_days;
+  if (patch.plan_days !== undefined) next.plan_days = patch.plan_days;
+  if (patch.avoid_consecutive_cuisine !== undefined) {
+    next.avoid_consecutive_cuisine = patch.avoid_consecutive_cuisine;
+  }
 
   const { error } = await db.from("household_preferences").upsert(
     {
@@ -154,6 +169,10 @@ export async function updatePreferences(
       free_staples: next.free_staples,
       persona_style: next.persona_style,
       shopping_sources: next.shopping_sources,
+      weeknight_cap_minutes: next.weeknight_cap_minutes,
+      weeknight_days: next.weeknight_days,
+      plan_days: next.plan_days,
+      avoid_consecutive_cuisine: next.avoid_consecutive_cuisine,
       onboarded: true,
       updated_at: new Date().toISOString(),
     },

@@ -4,11 +4,16 @@
 // orchestrator, which also records ratings).
 
 import { completeRaw } from "./anthropic.ts";
+import { DAY_KEYS, type DayKey } from "./planner.ts";
 
 const INTENT_MODEL = Deno.env.get("SOUS_INTENT_MODEL") ?? "claude-haiku-4-5-20251001";
 
 export type Intent = "plan" | "swap" | "lock" | "chat";
-export type Day = "mon" | "tue" | "wed" | "thu" | "fri";
+// Reuse the planner's day vocabulary rather than a second literal list. This
+// was capped at mon-fri while the planner moved to all seven days, so a
+// household planning weekend dinners could not say "swap saturday" — the
+// classifier had no token for it and the day was silently dropped.
+export type Day = DayKey;
 
 const ROUTE_TOOL = {
   name: "route",
@@ -24,8 +29,8 @@ const ROUTE_TOOL = {
       },
       day: {
         type: "string",
-        enum: ["mon", "tue", "wed", "thu", "fri"],
-        description: "for swap: which weekday's dinner to change, if named",
+        enum: [...DAY_KEYS],
+        description: "for swap: which day's dinner to change, if named",
       },
     },
     required: ["intent"],

@@ -170,6 +170,30 @@ const TOOLS = [
           description:
             "IANA timezone name, e.g. Europe/Berlin, America/Chicago. Sets which local hour the weekly kickoff fires at. Use for 'we moved to London' or 'the plan shows up at the wrong time'. Convert their city/region yourself; never ask for the raw string.",
         },
+        weeknight_cap_minutes: {
+          type: "integer",
+          minimum: 10,
+          maximum: 240,
+          description:
+            "max active cook time on a weeknight. Use for 'I can cook longer on weeknights' (raise) or 'keep weeknights under 30 minutes' (lower).",
+        },
+        weeknight_days: {
+          type: "array",
+          items: { type: "string", enum: [...DAY_KEYS] },
+          description:
+            "FULL replacement list of which days count as weeknights (the days the time cap applies to). Use for 'I work weekends, so Sat and Sun are my busy nights'.",
+        },
+        plan_days: {
+          type: "array",
+          items: { type: "string", enum: [...DAY_KEYS] },
+          description:
+            "FULL replacement list of which specific days to plan dinners for, in order. Use for 'only plan Mon through Thu' or 'we cook weekends too'. Send an empty array to go back to the default (the first N days of the week).",
+        },
+        avoid_consecutive_cuisine: {
+          type: "boolean",
+          description:
+            "whether to avoid the same cuisine two days running. Use for 'stop spacing out the Italian, I don't care'.",
+        },
       },
     },
   },
@@ -538,6 +562,28 @@ async function applyPreferenceUpdate(
   if (typeof input.locale === "string" && input.locale.trim()) {
     const canonical = canonicalizeLocale(input.locale);
     if (canonical) patch.locale = canonical;
+  }
+
+  // Planning rules (T9). Day lists are filtered to real keys so a hallucinated
+  // "monday" can't reach arrangeDays, and the cap is clamped to something a
+  // person could actually cook within.
+  if (typeof input.weeknight_cap_minutes === "number") {
+    patch.weeknight_cap_minutes = Math.min(
+      240,
+      Math.max(10, Math.round(input.weeknight_cap_minutes)),
+    );
+  }
+  for (const field of ["weeknight_days", "plan_days"] as const) {
+    if (Array.isArray(input[field])) {
+      const days = (input[field] as unknown[])
+        .map((d) => String(d).trim().toLowerCase())
+        .filter((d): d is DayKey => (DAY_KEYS as readonly string[]).includes(d));
+      // An empty plan_days means "back to the default", which is NULL.
+      patch[field] = field === "plan_days" && days.length === 0 ? null : days;
+    }
+  }
+  if (typeof input.avoid_consecutive_cuisine === "boolean") {
+    patch.avoid_consecutive_cuisine = input.avoid_consecutive_cuisine;
   }
 
   // Timezone lives on households, not household_preferences.
