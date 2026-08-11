@@ -11,7 +11,7 @@
 import { dbClient } from "./db.ts";
 import { completeRaw, type Msg, normalize } from "./anthropic.ts";
 import { sendMessage } from "./telegram.ts";
-import { sousSystem } from "./persona.ts";
+import { PERSONA_NOTE_MAX, PERSONA_STYLES, sousSystem } from "./persona.ts";
 import {
   canonicalizeLocale,
   describeHousehold,
@@ -141,9 +141,14 @@ const TOOLS = [
         },
         persona_style: {
           type: "string",
-          enum: ["weissman", "neutral", "warm"],
+          enum: [...PERSONA_STYLES],
           description:
-            "the chef's tone. Use for 'talk to me plainly' (neutral), 'be less intense'/'be sweeter' (warm), or 'bring the energy' (weissman).",
+            "the chef's overall tone. Use for 'talk to me plainly' (neutral), 'be less intense'/'be sweeter' (warm), or 'bring the energy' (bold).",
+        },
+        persona_note: {
+          type: "string",
+          description:
+            "the household's OWN words for how Sous should sound, kept verbatim and folded into the voice — e.g. 'talk like a grumpy French chef', 'keep it to one line', 'never use exclamation marks'. Use this whenever they describe a voice that none of the three styles covers. Pass an empty string to clear it and go back to the plain style.",
         },
         currency: {
           type: "string",
@@ -251,7 +256,7 @@ export async function runOrchestrator(conversationId: string): Promise<string> {
 
   const desc = describeHousehold(await getPreferences(db, convo.household_id));
   const planCtx = await planContextBlock(db, convo.household_id);
-  const SYSTEM = sousSystem(desc.context, desc.personaStyle) +
+  const SYSTEM = sousSystem(desc.context, desc.personaStyle, desc.personaNote) +
     (planCtx ? `\n\n${planCtx}` : "") + AGENT_INSTRUCTION;
 
   // Who sent the latest inbound turn (the rater / actor).
@@ -546,8 +551,15 @@ async function applyPreferenceUpdate(
     unrecognizedDiet = norm.unrecognized;
   }
   if (typeof input.persona_style === "string" &&
-      ["weissman", "neutral", "warm"].includes(input.persona_style)) {
+      (PERSONA_STYLES as readonly string[]).includes(input.persona_style)) {
     patch.persona_style = input.persona_style;
+  }
+  // Free-text voice steering, in the household's own words. Bounded so it can
+  // never crowd out the household context or the dietary rules beneath it; an
+  // empty string is an explicit "go back to the plain style".
+  if (typeof input.persona_note === "string") {
+    const note = input.persona_note.trim().slice(0, PERSONA_NOTE_MAX);
+    patch.persona_note = note || null;
   }
   if (typeof input.currency === "string" && input.currency.trim()) {
     patch.currency = input.currency.trim().toUpperCase();

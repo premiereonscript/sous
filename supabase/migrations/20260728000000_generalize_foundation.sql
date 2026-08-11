@@ -34,7 +34,7 @@ alter table household_preferences
   add column if not exists plan_days           text[],  -- null = auto-fill first N weekdays
   add column if not exists avoid_consecutive_cuisine boolean not null default true,
   -- Voice + locale.
-  add column if not exists persona_style       text    not null default 'weissman',
+  add column if not exists persona_style       text    not null default 'bold',
   add column if not exists locale              text    not null default 'en-US',
   -- Weekly kickoff timing, interpreted in households.timezone (T12).
   add column if not exists plan_day            text    not null default 'fri',

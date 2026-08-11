@@ -26,8 +26,10 @@ export interface Preferences {
   // off the shopping list (e.g. eggs for a household with backyard chickens).
   // Empty by default — no assumption that anyone has a free source.
   free_staples: string[];
-  // Chef voice: "weissman" (default), "neutral", or "warm".
+  // Chef voice: "bold" (default), "neutral", or "warm", plus optional
+  // free-text steering in the household's own words.
   persona_style: string;
+  persona_note: string | null;
   // Shopping-list section labels, in order. Default a single "Grocery" bucket;
   // a household that also shops a market uses ["Farmers Market","Grocery"].
   shopping_sources: string[];
@@ -51,7 +53,8 @@ export const DEFAULT_PREFS: Preferences = {
   dietary_restrictions: [],
   excluded_ingredients: [],
   free_staples: [],
-  persona_style: "weissman",
+  persona_style: "bold",
+  persona_note: null,
   shopping_sources: ["Grocery"],
   weeknight_cap_minutes: 45,
   weeknight_days: ["mon", "tue", "wed", "thu"],
@@ -82,7 +85,8 @@ export async function getPreferences(
     dietary_restrictions: (data.dietary_restrictions ?? []) as string[],
     excluded_ingredients: (data.excluded_ingredients ?? []) as string[],
     free_staples: (data.free_staples ?? []) as string[],
-    persona_style: (data.persona_style ?? "weissman") as string,
+    persona_style: (data.persona_style ?? "bold") as string,
+    persona_note: (data.persona_note ?? null) as string | null,
     shopping_sources: (data.shopping_sources ?? ["Grocery"]) as string[],
     weeknight_cap_minutes: (data.weeknight_cap_minutes ?? 45) as number,
     weeknight_days: (data.weeknight_days ?? ["mon", "tue", "wed", "thu"]) as string[],
@@ -105,6 +109,7 @@ export interface PreferenceUpdate {
   excluded_ingredients?: string[];
   free_staples?: string[];
   persona_style?: string;
+  persona_note?: string | null;
   currency?: string;
   unit_system?: string;
   locale?: string;
@@ -140,6 +145,7 @@ export async function updatePreferences(
   }
   if (patch.free_staples !== undefined) next.free_staples = patch.free_staples;
   if (patch.persona_style !== undefined) next.persona_style = patch.persona_style;
+  if (patch.persona_note !== undefined) next.persona_note = patch.persona_note;
   if (patch.currency !== undefined) next.currency = patch.currency;
   if (patch.unit_system !== undefined) next.unit_system = patch.unit_system;
   if (patch.locale !== undefined) next.locale = patch.locale;
@@ -168,6 +174,7 @@ export async function updatePreferences(
       excluded_ingredients: next.excluded_ingredients,
       free_staples: next.free_staples,
       persona_style: next.persona_style,
+      persona_note: next.persona_note,
       shopping_sources: next.shopping_sources,
       weeknight_cap_minutes: next.weeknight_cap_minutes,
       weeknight_days: next.weeknight_days,
@@ -190,7 +197,8 @@ export interface HouseholdDescription {
   mealsPerWeek: number;
   weeklyBudget: number | null;
   freeStaples: string[]; // ingredients the household already has (off the list)
-  personaStyle: string; // chef voice: weissman | neutral | warm
+  personaStyle: string; // chef voice: bold | neutral | warm
+  personaNote: string | null; // free-text voice steering, if they set any
   currency: string;
   unitSystem: string;
   locale: string;
@@ -320,6 +328,7 @@ export function describeHousehold(p: Preferences): HouseholdDescription {
     weeklyBudget,
     freeStaples: p.free_staples,
     personaStyle: p.persona_style,
+    personaNote: p.persona_note,
     currency: p.currency,
     unitSystem: p.unit_system,
     locale: p.locale,

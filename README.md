@@ -1,10 +1,10 @@
 # Sous 🥄
 
 A personal **Telegram meal-planning bot** that replaces a meal-kit
-subscription — your own private sous-chef named **Sous**, a chef with a
-Joshua-Weissman streak. Once a week it proposes your dinners, lets you swap,
-customize, or lock them with a tap (or just by texting), and hands back a
-shopping list built for however you actually shop.
+subscription — your own private sous-chef named **Sous**, who sounds however you
+want them to. Once a week it proposes your dinners, lets you swap, customize, or
+lock them with a tap (or just by texting), and hands back a shopping list built
+for however you actually shop.
 
 It is deliberately **not** a SaaS. There's no sign-up page. You deploy your
 **own** private instance for **your** household — it's a prompt, a cron, and a
@@ -163,8 +163,12 @@ files. Onboarding asks the essentials; after that, tell Sous things like:
 - **Money & units** — *"budget is €900/month"*, *"use metric"*.
 - **Schedule** — plan fewer/more dinners, cook longer on weeknights, or plan
   only certain days. The weekly plan arrives at **your** local time.
-- **Voice** — *"talk to me plainly"* (neutral) / *"be sweeter"* (warm) / the
-  default high-energy chef.
+- **Voice** — three built-in tones: **bold** (the default — high-energy,
+  opinionated, a bit theatrical), **neutral** (*"talk to me plainly"*), and
+  **warm** (*"be sweeter"*). Or describe the chef you actually want and Sous
+  keeps your wording: *"talk like a grumpy French chef"*, *"one line, no
+  exclamation marks"*, *"more encouraging, I'm learning to cook"*. Tone only —
+  no phrasing you pick can loosen a dietary rule.
 - **Language** — *"responde en español"* switches replies to your language.
 
 Deeper changes live in the repo:

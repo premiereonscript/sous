@@ -60,7 +60,7 @@ with `--no-verify-jwt`.
 | `db.ts` | service-role Supabase client (bypasses RLS) |
 | `anthropic.ts` | Messages API client (text + tool use) |
 | `telegram.ts` | sendMessage / editMessageText / answerCallbackQuery |
-| `persona.ts` | Sous voices — weissman (default), neutral, warm |
+| `persona.ts` | Sous voices — bold (default), neutral, warm, plus free-text steering |
 | `intent.ts` | Haiku intent classification |
 | `planner.ts` | propose / swap / customize / lock + recipe cards + shopping list |
 | `orchestrate.ts` | the conversational agent and its tools |

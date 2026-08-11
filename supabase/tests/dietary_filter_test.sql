@@ -42,47 +42,47 @@ insert into recipe_ingredients (recipe_id, ingredient_id, quantity, unit) values
 
 -- Households with different constraints.
 insert into households (id, name) values
-  ('c0000000-0000-0000-0000-0000000000fn', 'None'),
-  ('c0000000-0000-0000-0000-0000000000fv', 'Veg'),
-  ('c0000000-0000-0000-0000-0000000000fx', 'ExclName'),
-  ('c0000000-0000-0000-0000-0000000000fs', 'ExclAllergen'),
-  ('c0000000-0000-0000-0000-0000000000fk', 'NutAllergy'),
-  ('c0000000-0000-0000-0000-0000000000fp', 'NutWordAllergy');
+  ('c0000000-0000-0000-0000-0000000000a1', 'None'),
+  ('c0000000-0000-0000-0000-0000000000a2', 'Veg'),
+  ('c0000000-0000-0000-0000-0000000000a3', 'ExclName'),
+  ('c0000000-0000-0000-0000-0000000000a4', 'ExclAllergen'),
+  ('c0000000-0000-0000-0000-0000000000a5', 'NutAllergy'),
+  ('c0000000-0000-0000-0000-0000000000a6', 'NutWordAllergy');
 insert into household_preferences (household_id, dietary_restrictions, excluded_ingredients) values
-  ('c0000000-0000-0000-0000-0000000000fn', '{}',           '{}'),
-  ('c0000000-0000-0000-0000-0000000000fv', '{vegetarian}', '{}'),
-  ('c0000000-0000-0000-0000-0000000000fx', '{}',           '{test_pork}'),
-  ('c0000000-0000-0000-0000-0000000000fs', '{}',           '{soy}'),
-  ('c0000000-0000-0000-0000-0000000000fk', '{no_nuts}',    '{}'),
+  ('c0000000-0000-0000-0000-0000000000a1', '{}',           '{}'),
+  ('c0000000-0000-0000-0000-0000000000a2', '{vegetarian}', '{}'),
+  ('c0000000-0000-0000-0000-0000000000a3', '{}',           '{test_pork}'),
+  ('c0000000-0000-0000-0000-0000000000a4', '{}',           '{soy}'),
+  ('c0000000-0000-0000-0000-0000000000a5', '{no_nuts}',    '{}'),
   -- The everyday word, not the token the data uses ('tree_nuts').
-  ('c0000000-0000-0000-0000-0000000000fp', '{}',           '{nuts}');
+  ('c0000000-0000-0000-0000-0000000000a6', '{}',           '{nuts}');
 
 -- ---------------------------------------------------------------------------
 -- 1. No restrictions: both basic test recipes are candidates.
 select is(
-  (select count(*)::int from candidate_recipes(28, 1000, 'c0000000-0000-0000-0000-0000000000fn')
+  (select count(*)::int from candidate_recipes(28, 1000, 'c0000000-0000-0000-0000-0000000000a1')
      where title in ('Test Veg', 'Test Pork')),
   2, 'no restrictions: both test recipes are candidates');
 
 -- 2 & 3. Vegetarian household: the pork recipe is filtered out, veg stays.
 select is(
-  (select count(*)::int from candidate_recipes(28, 1000, 'c0000000-0000-0000-0000-0000000000fv')
+  (select count(*)::int from candidate_recipes(28, 1000, 'c0000000-0000-0000-0000-0000000000a2')
      where title = 'Test Pork'),
   0, 'vegetarian: pork recipe is hard-filtered out');
 select is(
-  (select count(*)::int from candidate_recipes(28, 1000, 'c0000000-0000-0000-0000-0000000000fv')
+  (select count(*)::int from candidate_recipes(28, 1000, 'c0000000-0000-0000-0000-0000000000a2')
      where title = 'Test Veg'),
   1, 'vegetarian: vegetarian recipe remains');
 
 -- 4. Excluded ingredient by name: pork recipe dropped.
 select is(
-  (select count(*)::int from candidate_recipes(28, 1000, 'c0000000-0000-0000-0000-0000000000fx')
+  (select count(*)::int from candidate_recipes(28, 1000, 'c0000000-0000-0000-0000-0000000000a3')
      where title = 'Test Pork'),
   0, 'excluded_ingredients by name: pork recipe dropped');
 
 -- 5. Excluded by allergen tag ('soy' matches the tofu ingredient's allergen).
 select is(
-  (select count(*)::int from candidate_recipes(28, 1000, 'c0000000-0000-0000-0000-0000000000fs')
+  (select count(*)::int from candidate_recipes(28, 1000, 'c0000000-0000-0000-0000-0000000000a4')
      where title = 'Test Veg'),
   0, 'excluded_ingredients by allergen: soy drops the tofu recipe');
 
@@ -90,32 +90,32 @@ select is(
 --    v5 rewrite dropped this predicate; every LLM customization re-entered the
 --    planning pool, carrying no dietary_tags.
 select is(
-  (select count(*)::int from candidate_recipes(28, 1000, 'c0000000-0000-0000-0000-0000000000fn')
+  (select count(*)::int from candidate_recipes(28, 1000, 'c0000000-0000-0000-0000-0000000000a1')
      where title = 'Test Variant'),
   0, 'is_variant recipes are never planning candidates');
 
 -- 7 & 8. FAIL CLOSED: an unclassified recipe is safe for nobody with a
 --    restriction, but still fine for a household with none.
 select is(
-  (select count(*)::int from candidate_recipes(28, 1000, 'c0000000-0000-0000-0000-0000000000fn')
+  (select count(*)::int from candidate_recipes(28, 1000, 'c0000000-0000-0000-0000-0000000000a1')
      where title = 'Test Untagged'),
   1, 'unrestricted household still sees an untagged recipe');
 select is(
-  (select count(*)::int from candidate_recipes(28, 1000, 'c0000000-0000-0000-0000-0000000000fv')
+  (select count(*)::int from candidate_recipes(28, 1000, 'c0000000-0000-0000-0000-0000000000a2')
      where title = 'Test Untagged'),
   0, 'restricted household never sees an UNCLASSIFIED recipe (fail closed)');
 
 -- 9. Two independent sources: a recipe mis-tagged at the recipe level is still
 --    caught by its ingredient allergens.
 select is(
-  (select count(*)::int from candidate_recipes(28, 1000, 'c0000000-0000-0000-0000-0000000000fk')
+  (select count(*)::int from candidate_recipes(28, 1000, 'c0000000-0000-0000-0000-0000000000a5')
      where title = 'Test Mistagged Nut'),
   0, 'no_nuts catches a recipe whose contains_nuts tag is missing');
 
 -- 10. Vocabulary bridge: the recipe tag says contains_nuts, the ingredient says
 --     tree_nuts, and the household typed the everyday word "nuts".
 select is(
-  (select count(*)::int from candidate_recipes(28, 1000, 'c0000000-0000-0000-0000-0000000000fp')
+  (select count(*)::int from candidate_recipes(28, 1000, 'c0000000-0000-0000-0000-0000000000a6')
      where title = 'Test Mistagged Nut'),
   0, 'excluding the word "nuts" reaches the tree_nuts allergen token');
 
@@ -126,14 +126,14 @@ select cmp_ok(
 
 -- 12 & 13. The seeded catalog leaves a vegan household a usable pool (T18):
 --     at least 6 vegan mains, and no pork dish sneaks in.
-insert into households (id, name) values ('c0000000-0000-0000-0000-0000000000fw', 'Vegan');
+insert into households (id, name) values ('c0000000-0000-0000-0000-0000000000a7', 'Vegan');
 insert into household_preferences (household_id, dietary_restrictions) values
-  ('c0000000-0000-0000-0000-0000000000fw', '{vegan}');
+  ('c0000000-0000-0000-0000-0000000000a7', '{vegan}');
 select cmp_ok(
-  (select count(*)::int from candidate_recipes(28, 1000, 'c0000000-0000-0000-0000-0000000000fw')),
+  (select count(*)::int from candidate_recipes(28, 1000, 'c0000000-0000-0000-0000-0000000000a7')),
   '>=', 6, 'vegan household has at least 6 candidate recipes (T18 catalog balance)');
 select is(
-  (select count(*)::int from candidate_recipes(28, 1000, 'c0000000-0000-0000-0000-0000000000fw')
+  (select count(*)::int from candidate_recipes(28, 1000, 'c0000000-0000-0000-0000-0000000000a7')
      where title = 'Carnitas Bowls'),
   0, 'vegan household never sees the pork carnitas');
 
@@ -141,19 +141,19 @@ select is(
 -- 14-17. diet_conflict guards the customize path — the one place an ingredient
 --    reaches a household's week without going through candidate_recipes.
 select ok(
-  diet_conflict('c0000000-0000-0000-0000-0000000000fk', 'test_cashew') is not null,
+  diet_conflict('c0000000-0000-0000-0000-0000000000a5', 'test_cashew') is not null,
   'no_nuts household: adding a tree-nut ingredient is refused');
 
 select ok(
-  diet_conflict('c0000000-0000-0000-0000-0000000000fp', 'test_cashew') is not null,
+  diet_conflict('c0000000-0000-0000-0000-0000000000a6', 'test_cashew') is not null,
   'a household excluding the word "nuts" is protected from a tree_nuts ingredient');
 
 select ok(
-  diet_conflict('c0000000-0000-0000-0000-0000000000fx', 'test_pork') is not null,
+  diet_conflict('c0000000-0000-0000-0000-0000000000a3', 'test_pork') is not null,
   'an explicitly excluded ingredient is refused by name');
 
 select ok(
-  diet_conflict('c0000000-0000-0000-0000-0000000000fn', 'test_cashew') is null,
+  diet_conflict('c0000000-0000-0000-0000-0000000000a1', 'test_cashew') is null,
   'a household with no restrictions can add anything');
 
 select * from finish();
