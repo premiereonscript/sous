@@ -1,8 +1,9 @@
-// Planner — propose a 5-dinner week (SPEC §8 rules, §9.3 Friday flow, §9.4).
+// Planner — propose a week of dinners (SPEC §8 rules, §9.3 kickoff flow, §9.4).
+// Count is the household's meals_per_week (1-7); days come from plan_days.
 //
-// Flow: pull rotation candidates (candidate_recipes SQL) -> Sonnet picks 5 via
-// the forced `propose_plan` tool -> validate against candidates -> write a
-// 'proposed' meal_plan + items -> post §7.3 recipe cards to the chat.
+// Flow: pull rotation candidates (candidate_recipes SQL, already diet-filtered)
+// -> Sonnet picks N via the forced `propose_plan` tool -> validate against
+// candidates -> write a 'proposed' meal_plan + items -> post §7.3 recipe cards.
 //
 // Day 5 adds the [Approve]/[Swap]/[Lock] inline keyboards + swap_meal/lock_plan.
 
@@ -194,8 +195,9 @@ export async function proposePlan(conversationId: string): Promise<void> {
     return;
   }
 
-  // Deterministically arrange across Mon–Fri so the §8 hard rules always hold:
-  // no cuisine on consecutive days, and >45 min dishes only on Friday.
+  // Deterministically arrange across the household's planning days so the §8
+  // rules hold where the catalog allows: no cuisine on consecutive days, and
+  // long dishes off weeknights. Both rules are per-household.
   const chosen = arrangeDays(picked, desc);
 
   // Write a 'proposed' plan (replace any existing draft for the week).
@@ -381,8 +383,9 @@ export async function swapMeal(
   const dayKey = dateToDayKey(item.day);
 
   // Hard-enforce the §8 rules the model treats as soft: no cuisine on
-  // consecutive days, and Mon–Thu stay ≤45 min. Fall back to the full pool
-  // only if filtering leaves nothing.
+  // consecutive days, and weeknights stay inside the household's cook-time cap.
+  // Both come from preferences. Fall back to the full pool only if filtering
+  // leaves nothing, so a thin catalog degrades rather than fails.
   const sorted = [...week].sort((a, b) => (a.day < b.day ? -1 : 1));
   const idx = sorted.findIndex((w) => w.recipe_id === item.recipe_id);
   const neighborCuisines = new Set<string>();

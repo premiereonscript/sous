@@ -67,6 +67,8 @@ household cannot use the bot at all.
 | ID | Work |
 |----|------|
 | T16 | Docs — README "Make it yours", SETUP config reference, SPEC v1 scope |
+| T17 | Test suite — Deno unit tests, pgTAP database tests, CI |
+| T18 | Catalog balance — 6 vegan + 2 vegetarian mains, so a plant-based household can get a first week at all |
 
 ---
 
@@ -79,6 +81,46 @@ same standard.
 
 ## Status
 
-Tracked in the session task board (T1–T16). Work lands on the
-`generalize-for-public` branch; nothing goes to `main` or public without the
-owner's explicit approval.
+**T1–T13 and T16–T18 shipped.** T14 (full i18n) and the multi-household half of
+T15 were deliberately deferred — see *Still open*.
+
+Every hardcoded assumption listed above is now a per-household preference with a
+neutral default. Onboarding captures the seven that block a first plan
+(household size, kids' ages, dinners per week, budget, cuisines, diet and
+allergies, timezone); the rest default sensibly and are changeable by chat. The
+kickoff day and hour are the exception — SQL only, for now.
+
+## Pre-landing review findings
+
+A review of the whole branch before landing found and fixed these. Recorded
+because each is a failure mode worth re-checking against future changes:
+
+- **A rewritten SQL function silently dropped a predicate from an earlier
+  migration.** `candidate_recipes` was rebuilt from the v3 body and lost the
+  `is_variant` exclusion added in v4, so one-off LLM customizations re-entered
+  the planning pool.
+- **Half of the dietary filter failed open.** The allergen checks passed any
+  recipe merely *lacking* a `contains_*` tag, while the vegetarian/vegan checks
+  required a tag — two halves of one filter disagreeing about what an untagged
+  row means. Untagged now means unclassified, and is refused.
+- **A "preserve the live instance" data step had no `WHERE` clause**, so any
+  public deploy that onboarded and later pulled an update inherited the
+  author's free staples and shopping split.
+- **Preferences were readable but not writable.** Four planning-rule fields and
+  the timezone had no write path anywhere, while the README advertised changing
+  them by chat.
+
+## Still open
+
+- **Kid-safety in code.** The `unsafe_for_age` block-list (SPEC §10.7) is still
+  prompt-enforced only. Diet and allergy avoidance *is* enforced in SQL.
+- **Fixed UI strings are English.** Locale drives replies, generated content,
+  money and dates, but not the literal labels ("Shopping list") or the starter
+  catalog.
+- **Thin vegan rotation.** The catalog carries 6 vegan mains against a 28-day
+  reuse window, so a strictly vegan household gets one full week and then a
+  shrinking one. More plant-based mains is the highest-value catalog
+  contribution.
+- **One household per deploy.** A deliberate v1 boundary, not a gap — see the
+  *Generalization note* at the top of SPEC.md. The multi-chat fan-out half of
+  T15 did ship; multi-household-per-deploy did not.

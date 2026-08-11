@@ -18,6 +18,8 @@ jobs:
         run: deno task check
       - name: Unit tests
         run: deno task test
+      - name: Lint
+        run: deno task lint
 
   # Apply every migration to a real local Supabase stack and run the pgTAP
   # database tests. This is what validates the SQL (portion scaling, per-household

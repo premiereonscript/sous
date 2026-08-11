@@ -268,7 +268,7 @@ keyboards for tag pickers, mobile-first, free.
 > *Thu* Chicken Larb Lettuce Cups
 > *Fri* Sheet-Pan Sausage & Peppers
 >
-> *Sat & Sun:* DIY — leftovers, market-fresh, or eggs from the coop 🍳
+> *Sat & Sun:* DIY — leftovers, whatever looked good at the market 🍳
 >
 > [✅ Lock the week]  [🔄 One more change]
 
@@ -460,10 +460,10 @@ catches the long tail.
 
 | Layer | Choice | Why |
 |---|---|---|
-| Runtime | TypeScript on Supabase Edge Functions (Deno) | Same project as DB, zero glue, free tier covers this household, Anthropic TS SDK is first-class. |
+| Runtime | TypeScript on Supabase Edge Functions (Deno) | Same project as DB, zero glue, free tier covers a single household, Anthropic TS SDK is first-class. |
 | Database | Supabase Postgres (with `pgvector` later) | Single vendor, free tier, RLS built-in. |
-| Auth | None for end users; service-role from Edge Fns | Two hard-coded `telegram_id`s in `users`. Closed system. |
-| LLM | Claude `claude-haiku-4-5` (intent), `claude-sonnet-4-6` (workhorse), `claude-opus-4-7` (rare recipe-generation fallback) | Cheap classification + capable orchestration + heavyweight reasoning only when starved of candidates. |
+| Auth | None for end users; service-role from Edge Functions | Access is the `TELEGRAM_ALLOWED_CHAT_IDS` allowlist plus the Telegram secret token; the household and its users self-provision on first allowed message. Closed system. |
+| LLM | Claude `claude-haiku-4-5` (intent), `claude-sonnet-4-6` (onboarding, chat, planning); every id overridable by env var | Cheap classification + capable orchestration. An Opus recipe-generation tier is designed but not built. |
 | Scheduling | Supabase `pg_cron` + `pg_net` | Already in the project, no second vendor. |
 | Hosting | Supabase Edge Functions | Free. Free subdomain. Done. |
 
@@ -473,33 +473,43 @@ All tables: `id uuid primary key default gen_random_uuid()`,
 `created_at timestamptz default now()` unless noted. RLS enabled on every
 household-scoped table; service-role bypasses, and that's the only caller.
 
-- **`households`**: `name text`, `timezone text default 'America/Los_Angeles'`.
+- **`households`**: `name text`, `timezone text default 'UTC'` — the real zone
+  is captured at onboarding and drives the local kickoff hour.
 - **`users`**: `household_id fk`, `display_name`, `role text check (role in ('adult','toddler'))`, `telegram_id bigint unique`, `birthdate date null`.
 - **`taste_profile`**: `user_id fk`, `dimension text` (`spice_tolerance`, `dislike`, `restriction`, `loves`), `value jsonb`, `confidence real default 0.7`, `updated_at`. One row per (user, dimension, value).
-- **`ingredients`**: `name_canonical text unique`, `aliases text[]`, `unit_default text`, `source_hint text check (source_hint in ('farmers_market','grocery','either'))`, `seasonal_months int[] null`, `is_free boolean default false` (eggs = true).
-- **`recipes`**: `title`, `cuisine_tag text check (cuisine_tag in ('mexican','asian','italian','other'))`, `body_md`, `time_minutes int`, `toddler_variant_notes text null`, `source text check (source in ('llm_generated','curated'))`, `last_used_on date null`, `times_used int default 0`, `embedding vector(1024) null`.
+- **`ingredients`**: `name_canonical text unique`, `aliases text[]`, `unit_default text`, `source_hint text` (CHECK dropped, though the code still writes only `farmers_market` / `grocery` / `either`), `seasonal_months int[] null`, `allergens text[]` — the authoritative allergen data, cross-checked against `recipes.dietary_tags` by the hard filter. `is_free boolean` is **deprecated**, replaced by per-household `free_staples`.
+- **`recipes`**: `title`, `cuisine_tag text` (CHECK dropped — any cuisine), `body_md`, `time_minutes int`, `toddler_variant_notes text null`, `source text check (source in ('llm_generated','curated'))`, `last_used_on date null`, `times_used int default 0`, `base_servings int default 4` (the portion-scaling divisor), `dietary_tags text[]` (diet compatibility + `contains_*` markers), `is_variant boolean default false`, `parent_recipe_id null`, `embedding vector(1024) null`.
+- **`household_preferences`**: one row per household, PK `household_id`. Everything a kitchen differs on: `adults`, `kids jsonb`, `meals_per_week`, `monthly_budget_usd` + `currency`, `unit_system`, `locale`, `cuisines text[]`, `dietary_restrictions text[]`, `excluded_ingredients text[]`, `free_staples text[]`, `shopping_sources text[]`, `persona_style`, `weeknight_cap_minutes`, `weeknight_days text[]`, `plan_days text[] null`, `avoid_consecutive_cuisine`, `plan_day` + `plan_hour`, `onboarded`.
+- **`diet_rules`** / **`allergen_synonyms`**: the dietary vocabulary as data — which tag a diet key requires or forbids, which ingredient allergen it maps to, and the everyday words people type for them. Read by both `candidate_recipes` and `diet_conflict`, so the planning filter and the customize guard can never disagree.
 - **`recipe_ingredients`**: `recipe_id`, `ingredient_id`, `quantity numeric`, `unit text`, `optional boolean default false`. PK `(recipe_id, ingredient_id)`.
 - **`meal_plans`**: `household_id`, `week_of date` (Monday), `status text check (status in ('draft','proposed','locked','archived'))`, `locked_at timestamptz null`. Unique `(household_id, week_of)`.
 - **`meal_plan_items`**: `plan_id`, `day date`, `slot text check (slot in ('dinner'))` (v1 dinners only; widen later if lunches return), `recipe_id`, `toddler_variant_active boolean default true`, `position int`. Unique `(plan_id, day, slot)`.
-- **`feedback`**: `plan_item_id`, `rater_user_id`, `rating int check (rating between 1 and 5)`, `tags text[]`, `free_text text`.
+- **`feedback`**: `plan_item_id`, `rater_user_id`, `rating int check (rating between 1 and 5)`, `tags text[]`, `free_text text`. **v1 design, superseded** — the table exists but nothing writes it.
+- **`recipe_ratings`**: where ratings actually land. `household_id`, `recipe_id`, `rater_user_id`, `rating`, `note`, unique on `(recipe_id, rater_user_id)`. Read by `candidate_recipes` for the star line on each card.
+- **`recipe_exclusions`**: `household_id`, `recipe_id`, `reason text`, PK on both ids — a permanent "never make this again", stronger than a low rating. The per-household filtering pattern the dietary work was modelled on.
+- **`system_flags`**: per-household kill switch + daily cost guardrails (§10.4).
 - **`shopping_lists`**: `plan_id unique`, `generated_at`.
-- **`shopping_list_items`**: `list_id`, `ingredient_id`, `quantity`, `unit`, `source text check (source in ('farmers_market','grocery'))`, `checked boolean default false`.
+- **`shopping_list_items`**: `list_id`, `ingredient_id`, `quantity`, `unit`, `source text` (CHECK dropped) — still only `farmers_market` / `grocery`, derived from `ingredients.source_hint` plus seasonality. The household's `shopping_sources` labels are applied when the list is rendered, never stored here. `checked boolean default false`.
 - **`conversations`**: `household_id`, `telegram_chat_id bigint unique`, `active_plan_id`, `state text` (`idle`, `awaiting_feedback`, `proposing`, `editing`, `locked`), `state_payload jsonb`.
 - **`messages`**: `conversation_id`, `direction text check (direction in ('in','out'))`, `sender_user_id null`, `text`, `tool_calls jsonb null`, `telegram_update_id bigint unique`.
 
 ### 9.3 Core Flows
 
-**Friday 6pm job:**
-1. `pg_cron` calls Edge Function `kickoff_week`.
-2. Load household + last week's `meal_plan` and its `feedback`.
-3. Haiku call: classify any unrated items into "liked / meh / hated" from
-   free-text feedback collected during the week.
-4. Sonnet call #1: summarize last week ("you ate 4 of 5, skipped Tuesday
-   for takeout, toddlers rejected the curry"). Short, narrated.
+**Weekly kickoff job** (Friday 6pm by default, in each household's own timezone):
+1. `pg_cron` calls Edge Function `kickoff_week` hourly; it acts only on the
+   households due this local hour.
+2. Load household + last week's `meal_plan`.
+3. *(Designed, not built.)* Haiku call: classify any unrated items into
+   "liked / meh / hated" from free-text feedback collected during the week.
+4. *(Designed, not built.)* Sonnet call #1: summarize last week ("you ate 4 of
+   5, skipped Tuesday for takeout, toddlers rejected the curry"). Today the job
+   sends a short fixed greeting and goes straight to planning; ratings are
+   captured conversationally instead, any time.
 5. Planner: SQL query selects candidate recipes (rotation, seasonality,
-   cuisine balance — see §9.4).
-6. Sonnet call #2 with `propose_plan` tool: picks 5 dinners (Mon–Fri)
-   from candidates, writes a draft plan via tool calls.
+   cuisine balance, and the dietary hard filter — see §9.4).
+6. Sonnet call #2 with `propose_plan` tool: picks `meals_per_week` dinners
+   (1–7) from candidates; the days come from the household's `plan_days`, or
+   the first N of the week when unset. Writes a draft plan via tool calls.
 7. Post the proposal to Telegram as one message with inline keyboard
    buttons.
 
@@ -514,13 +524,15 @@ household-scoped table; service-role bypasses, and that's the only caller.
 
 **Lock + shopping list:**
 1. `lock_plan` tool flips `meal_plans.status` → `locked`.
-2. Pure SQL job (no LLM): aggregate `recipe_ingredients` across all
-   `meal_plan_items`, sum quantities by `ingredient_id`, exclude `is_free`,
-   group by `source_hint` (`either` defaults to `grocery` unless seasonal
-   in current month → `farmers_market`).
+2. Pure SQL job (no LLM), `generate_shopping_list`: aggregate
+   `recipe_ingredients` across all `meal_plan_items`, scale each quantity by
+   `servings_needed / base_servings`, drop anything in the household's
+   `free_staples`, and group by `source_hint` (`either` defaults to `grocery`
+   unless seasonal in the current month → `farmers_market`).
 3. Write `shopping_lists` + `shopping_list_items`.
-4. Post two messages: "Farmers market" and "Grocery", each with toggle
-   buttons.
+4. Post **one** message, sectioned using the household's `shopping_sources`
+   labels — a single bucket by default, split when one of their labels names a
+   market. Checkbox glyphs are cosmetic; there are no toggle buttons.
 
 ### 9.4 LLM Integration Details
 
@@ -580,13 +592,21 @@ ingredient list — the variant is a preparation fork, not a separate recipe.
 
 ### 9.5 Scheduled Jobs
 
-- **`kickoff_week`** — `0 18 * * 5 America/Los_Angeles` (Fri 6pm) —
-  propose next week's plan.
-- **`nag_unlocked`** — `0 9 * * 6` (Sat 9am) — if Friday's plan still
-  `draft` by Saturday morning, soft nudge in the thread so the market run
-  isn't blocked.
+**Built.** The repo schedules exactly one job:
+
+- **`kickoff_week_hourly`** — `0 * * * *` — propose next week's plan for each
+  household whose *local* `plan_day`/`plan_hour` is the current hour, read in
+  `households.timezone`. Default Friday 6pm, per household, so one hourly tick
+  serves every zone and DST needs no special handling.
+
+**Designed, not built.** Kept here as intent; none of these exist in
+`supabase/migrations/`:
+
+- **`nag_unlocked`** — `0 9 * * 6` — if the week's plan is still `draft` by
+  Saturday morning, soft nudge in the thread so the week isn't left unlocked.
 - **`archive_old_plans`** — `0 3 * * 1` — flip last week's `locked` plans
-  to `archived`, bump `recipes.last_used_on` and `times_used`.
+  to `archived`, bump `recipes.last_used_on` and `times_used`. (`last_used_on`
+  is currently bumped inline by `mark_recipes_used`.)
 - **`weekly_taste_compaction`** — `0 4 * * 1` — Haiku call to dedupe and
   merge `taste_profile` rows.
 

@@ -5,26 +5,28 @@ person **or** executed by an agent (e.g. Claude Code). Most of it is automated
 by [`setup.sh`](./setup.sh); the steps below are the source of truth and the
 manual fallback.
 
-> **For an agent running this:** steps 1–3 need a human (creating accounts,
-> BotFather, copying keys) — ask the user for those outputs. Steps 4–9 you can
-> run yourself. Never commit any secret; they belong only in Supabase secrets /
-> Vault and the gitignored `supabase/.temp/`.
+> **For an agent running this:** prerequisites **A–D** need a human (creating
+> accounts, BotFather, copying keys, installing the CLI) — ask the user for
+> those outputs. Numbered **steps 4–9** you can run yourself. Never commit any
+> secret; they belong only in Supabase secrets / Vault and the gitignored
+> `supabase/.temp/`.
 
 ---
 
 ## Prerequisites (human, one-time)
 
-1. **Supabase account** → create a new project at
-   [supabase.com/dashboard](https://supabase.com/dashboard). Note the
-   **Project Ref** (the `abcd...` in the URL) and the **database password** you
-   set.
-2. **Telegram bot** → message [@BotFather](https://t.me/BotFather), send
-   `/newbot`, pick a name + username. Copy the **bot token**
-   (`12345:AA...`).
-3. **Anthropic API key** → [console.anthropic.com](https://console.anthropic.com)
-   → API Keys. Set a monthly spend cap while you're there.
-4. **Supabase CLI** → `brew install supabase/tap/supabase` (or see
-   [docs](https://supabase.com/docs/guides/cli)), then `supabase login`.
+Lettered so they don't collide with the numbered steps further down.
+
+- **A. Supabase account** → create a new project at
+  [supabase.com/dashboard](https://supabase.com/dashboard). Note the
+  **Project Ref** (the `abcd...` in the URL) and the **database password** you
+  set.
+- **B. Telegram bot** → message [@BotFather](https://t.me/BotFather), send
+  `/newbot`, pick a name + username. Copy the **bot token** (`12345:AA...`).
+- **C. Anthropic API key** → [console.anthropic.com](https://console.anthropic.com)
+  → API Keys. Set a monthly spend cap while you're there.
+- **D. Supabase CLI** → `brew install supabase/tap/supabase` (or see
+  [docs](https://supabase.com/docs/guides/cli)), then `supabase login`.
 
 Have ready: `PROJECT_REF`, the DB password, `BOT_TOKEN`, `ANTHROPIC_API_KEY`.
 
@@ -103,8 +105,8 @@ supabase functions deploy orchestrator                 --use-api
 supabase functions deploy kickoff_week --no-verify-jwt --use-api
 supabase functions deploy send_list    --no-verify-jwt --use-api
 ```
-(`send_list` powers on-demand *"send me the shopping list"* / *"resend the plan"*
-and the manual helpers below — deploy all four.)
+(`send_list` backs the `trigger_send_list_now()` / `trigger_send_plan_now()` SQL
+helpers below — deploy all four.)
 
 ### 8. Capture your Telegram chat id and allow it
 The bot only responds to allow-listed ids. Easiest way to find yours:
@@ -135,9 +137,10 @@ curl "https://api.telegram.org/bot<BOT_TOKEN>/setWebhook" \
 
 Message your bot (everything below is just chat — no commands or slashes):
 - **"hi"** → first run kicks off **onboarding**: it asks how many people +
-  kids' ages, dinners per week, monthly budget, cuisines, and any dietary
-  restrictions / allergies, then saves them. Everything is adjustable later just
-  by texting (see [Make it yours](./README.md#make-it-yours)).
+  kids' ages, dinners per week, monthly budget, cuisines, any dietary
+  restrictions / allergies, and where you live (for the weekly plan's local
+  time), then saves them. Everything is adjustable later just by texting (see
+  [Make it yours](./README.md#make-it-yours)).
 - **"plan my week"** → proposes that many dinners with Swap/Lock buttons + a
   shopping list, tuned to your answers.
 - Tap **🔄 Swap** / **✅ Lock** on the cards, or just text it:
@@ -150,7 +153,7 @@ Message your bot (everything below is just chat — no commands or slashes):
     (stronger than a bad rating) and offers to swap it off the current week.
   - **"the carnitas were a 5"** → logs a **rating**; future plans favor hits.
   - **"send me the grocery list"** → re-posts the current, up-to-date shopping
-    list any time (via the `send_list` function).
+    list any time.
   - **"show me the full teriyaki salmon recipe"** → expands a full recipe card.
   - **"we're actually 3 adults now"** / **"bump the budget to $1,300"** →
     updates your **household preferences** conversationally.
@@ -178,20 +181,33 @@ select vault.create_secret('<KICKOFF_SECRET>', 'kickoff_secret')
 
 The cron runs **hourly** and kicks off each household at its own **local**
 plan time — by default Friday 6pm in the household's timezone. No timezone
-math or DST fiddling needed. To change *when* your household is planned, set
-`households.timezone` (defaults to `America/Los_Angeles`) and the
-`household_preferences.plan_day` / `plan_hour` columns.
+math or DST fiddling needed.
+
+Your timezone is captured during onboarding (Sous asks where you live and
+converts it to an IANA zone itself), and you can change it any time by saying
+so — *"we moved to Berlin"*. Before onboarding finishes the column sits at
+`UTC`, so a plan would fire at 6pm UTC.
+
+If your plan lands at the wrong hour, name a **city** rather than a zone
+abbreviation: *"we're in Austin"* resolves, while *"EST"* is rejected as
+ambiguous (it maps to a zone with no daylight saving) and leaves the zone
+unchanged. To change the *day and hour* rather than the zone, set
+`household_preferences.plan_day` / `plan_hour` in the SQL editor.
+
+> **Free-tier note:** Supabase pauses inactive free projects after about a week,
+> which stops `pg_cron` with it. If the weekly plan goes quiet, check whether
+> the project is paused before debugging anything else.
 
 ## Manual / off-cycle helpers
 
 The migrations install a few `SECURITY DEFINER` SQL functions you can call from
-the Supabase **SQL Editor** to drive the bot without waiting for Friday's cron
+the Supabase **SQL Editor** to drive the bot without waiting for the weekly cron
 or texting it. Each reads the function URL + shared secret from Vault, so no
 secret is ever exposed:
 
 | Call | What it does |
 |---|---|
-| `select trigger_kickoff_now();` | Runs the Friday kickoff **now** — proposes a fresh week. |
+| `select trigger_kickoff_now();` | Runs the weekly kickoff **now** — proposes a fresh week. |
 | `select trigger_send_plan_now();` | Re-posts the **current** plan (cards + list) without regenerating it. |
 | `select trigger_send_list_now();` | Re-posts just the **shopping list**. |
 | `select * from net_last_responses();` | Debug: last outbound HTTP calls (status + body) — handy if a send didn't arrive. |
@@ -206,7 +222,27 @@ disable privacy mode so it can read messages:
 Then add each member's id (or the group's negative chat id) to
 `TELEGRAM_ALLOWED_CHAT_IDS`.
 
+> The allowlist is the **only** authorization there is. Anyone on it — including
+> everyone in an allow-listed group chat — can drive the bot and spend your
+> Anthropic credit. Add ids deliberately, and keep the spend cap from
+> prerequisite C in place.
+
 ---
+
+## Tearing it down
+
+To stop the bot without deleting the project:
+
+```bash
+curl "https://api.telegram.org/bot<BOT_TOKEN>/deleteWebhook"
+```
+```sql
+select cron.unschedule('kickoff_week_hourly');
+delete from vault.secrets where name in ('project_url', 'kickoff_secret');
+```
+
+Then revoke the bot token with BotFather (`/revoke`) and delete the Anthropic
+key. Deleting the Supabase project removes everything else.
 
 ## Rotating / revoking secrets
 
@@ -221,5 +257,7 @@ Then add each member's id (or the group's negative chat id) to
 | Bot silent | id not in `TELEGRAM_ALLOWED_CHAT_IDS`, or webhook not set |
 | `getWebhookInfo` shows a 401/secret error | `TG_WEBHOOK_SECRET` ≠ the `secret_token` you set in step 9 |
 | Replies are empty / errors in logs | `ANTHROPIC_API_KEY` unset or out of credit |
-| `db push` asks for Docker | add `--use-api` is for functions; for db push, ensure you're linked (step 4) |
-| Friday plan never arrives | Vault secrets not set (see optional cron section) |
+| `db push` asks for Docker | `--use-api` only applies to `functions deploy`; for `db push` just make sure you're linked (step 4) |
+| Weekly plan never arrives | Vault secrets not set (see optional cron section) |
+| Plan arrives at the wrong hour | tell the bot where you live (*"we moved to Berlin"*), or set `household_preferences.plan_day` / `plan_hour` |
+| `supabase test db` says `function plan(integer) does not exist` | pgTAP isn't enabled on the local database — see [Tests](./README.md#tests) |
