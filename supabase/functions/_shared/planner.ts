@@ -280,7 +280,7 @@ export async function proposePlan(conversationId: string): Promise<void> {
     p_plan_id: plan.id,
   });
   const listMsgId = await post(
-    renderShoppingList(weekOf, (listRows ?? []) as ShoppingRow[], desc.freeStaples, desc.shoppingSources),
+    renderShoppingList(weekOf, (listRows ?? []) as ShoppingRow[], desc.freeStaples, desc.shoppingSources, desc.locale),
   );
 
   // Lock prompt, with the button.
@@ -468,7 +468,7 @@ export async function swapMeal(
       botToken,
       convo.telegram_chat_id,
       listMsgId,
-      renderShoppingList(plan.week_of, (listRows ?? []) as ShoppingRow[], desc.freeStaples, desc.shoppingSources),
+      renderShoppingList(plan.week_of, (listRows ?? []) as ShoppingRow[], desc.freeStaples, desc.shoppingSources, desc.locale),
       "HTML",
     );
   }
@@ -509,7 +509,7 @@ export async function lockPlan(
   const { data: listRows } = await db.rpc("generate_shopping_list", {
     p_plan_id: planId,
   });
-  const { free_staples, shopping_sources } = await getPreferences(db, convo.household_id);
+  const { free_staples, shopping_sources, locale } = await getPreferences(db, convo.household_id);
   const payload = convo.state_payload as {
     shopping_msg_id?: number;
     lock_msg_id?: number;
@@ -519,7 +519,7 @@ export async function lockPlan(
       botToken,
       convo.telegram_chat_id,
       payload.shopping_msg_id,
-      renderShoppingList(plan.week_of, (listRows ?? []) as ShoppingRow[], free_staples, shopping_sources),
+      renderShoppingList(plan.week_of, (listRows ?? []) as ShoppingRow[], free_staples, shopping_sources, locale),
       "HTML",
     );
   }
@@ -580,17 +580,27 @@ Keep the week valid (SPEC §8): ${
   }favor 4–5/5 ratings, and keep variety. Then call swap_meal.`;
 }
 
-// Order the picked recipes into Mon..Fri so no two adjacent days share a
-// cuisine and any >45-min dish lands on Friday. Brute force (≤120 perms).
-function arrangeDays(
+// Order the picked recipes across the household's planning days so no two
+// adjacent days share a cuisine and long dishes avoid weeknights. Brute force
+// over n! permutations; n is capped at 7 by proposePlan, so ≤5040.
+export function arrangeDays(
   picked: { cand: Candidate; why: string }[],
   desc: HouseholdDescription,
 ): { day: DayKey; cand: Candidate; why: string }[] {
   const n = picked.length;
   // Which days to plan: the household's explicit plan_days if set, else the
   // first N weekdays. Weeknight cap + days + the cuisine rule are all per-household.
-  const source = (desc.planDays && desc.planDays.length ? desc.planDays : DAY_KEYS);
-  const days = source.slice(0, n) as DayKey[];
+  //
+  // plan_days is free-form config (no CHECK constraint, no UI), so it can be
+  // shorter than the meal count or hold junk. Both used to produce
+  // `day: undefined`, which flows into dayDate() as indexOf(-1) — shifting the
+  // date a day earlier — and renders "undefined" on the card. Keep only real
+  // day keys, then top up from DAY_KEYS so there is always one day per meal.
+  const requested = (desc.planDays ?? []).filter((d): d is DayKey =>
+    (DAY_KEYS as readonly string[]).includes(d)
+  );
+  const ordered = requested.length ? requested : [...DAY_KEYS];
+  const days = [...ordered, ...DAY_KEYS.filter((d) => !ordered.includes(d))].slice(0, n);
   const weeknight = new Set(desc.weeknightDays);
   const cap = desc.weeknightCapMinutes;
   const valid = (perm: number[]): boolean => {
@@ -820,7 +830,7 @@ export async function sendCurrentPlan(conversationId: string): Promise<boolean> 
   const { data: listRows } = await db.rpc("generate_shopping_list", {
     p_plan_id: convo.active_plan_id,
   });
-  await post(renderShoppingList(plan?.week_of ?? firstDay, (listRows ?? []) as ShoppingRow[], desc.freeStaples, desc.shoppingSources));
+  await post(renderShoppingList(plan?.week_of ?? firstDay, (listRows ?? []) as ShoppingRow[], desc.freeStaples, desc.shoppingSources, desc.locale));
 
   if (plan?.status !== "locked") {
     await post("Looks right? Lock it in for the week 👇", lockButton(convo.active_plan_id));
@@ -856,13 +866,14 @@ export async function sendShoppingList(conversationId: string): Promise<boolean>
   const { data: listRows } = await db.rpc("generate_shopping_list", {
     p_plan_id: convo.active_plan_id,
   });
-  const { free_staples, shopping_sources } = await getPreferences(db, convo.household_id);
+  const { free_staples, shopping_sources, locale } = await getPreferences(db, convo.household_id);
 
   const text = renderShoppingList(
     plan?.week_of ?? "",
     (listRows ?? []) as ShoppingRow[],
     free_staples,
     shopping_sources,
+    locale,
   );
   await db.from("messages").insert({
     conversation_id: conversationId,
@@ -1150,7 +1161,7 @@ ${desc.context}`,
       botToken,
       convo.telegram_chat_id,
       listMsgId,
-      renderShoppingList(plan.week_of, (listRows ?? []) as ShoppingRow[], desc.freeStaples, desc.shoppingSources),
+      renderShoppingList(plan.week_of, (listRows ?? []) as ShoppingRow[], desc.freeStaples, desc.shoppingSources, desc.locale),
       "HTML",
     );
   }
@@ -1409,6 +1420,7 @@ export function renderShoppingList(
   rows: ShoppingRow[],
   freeStaples: string[] = [],
   sources: string[] = ["Grocery"],
+  locale = "en-US",
 ): string {
   const line = (r: ShoppingRow) =>
     `⬜ ${esc(r.ingredient)} — <b>${trimNum(r.quantity)} ${esc(r.unit)}</b>`;
@@ -1416,21 +1428,36 @@ export function renderShoppingList(
     rs.length ? rs.map(line).join("\n") : "<i>(nothing)</i>";
   const marketish = (s: string) => /farmer|market/i.test(s);
 
-  const out = [`🛒 <b>Shopping list · week of ${esc(fmt(weekOf))}</b>`, ""];
-  if (sources.length <= 1) {
+  const labels = sources.filter((s) => s && s.trim());
+  const out = [`🛒 <b>Shopping list · week of ${esc(fmt(weekOf, locale))}</b>`, ""];
+
+  // generate_shopping_list only ever tags a row 'farmers_market' or 'grocery',
+  // so at most two buckets are meaningful no matter how many stores the
+  // household names. Route by which label looks like a market, and never
+  // invent a bucket the data can't fill.
+  const marketIdx = labels.findIndex(marketish);
+
+  if (labels.length <= 1) {
     // Single store (the default): one bucket, everything in it.
-    out.push(`🏬 <b>${esc(sources[0] ?? "Grocery")}</b>`, section(rows));
+    out.push(`🏬 <b>${esc(labels[0] ?? "Grocery")}</b>`, section(rows));
+  } else if (marketIdx === -1) {
+    // Several stores, none market-like ("Costco" + "Trader Joe's"). The
+    // seasonal farmers_market/grocery hint means nothing here, so splitting on
+    // it would print one empty section and repeat a label — list once and name
+    // the stores instead.
+    out.push(`🏬 <b>${esc(labels.join(" · "))}</b>`, section(rows));
   } else {
-    // Split by ingredient source_hint into a market-like label and the rest.
-    const marketLabel = sources.find(marketish) ?? sources[0];
-    const groceryLabel = sources.find((s) => !marketish(s)) ?? sources[1] ?? sources[0];
+    const marketLabel = labels[marketIdx];
+    const rest = labels.filter((_, i) => i !== marketIdx);
     const market = rows.filter((r) => r.source === "farmers_market");
     const grocery = rows.filter((r) => r.source !== "farmers_market");
     out.push(
       `🧺 <b>${esc(marketLabel)}</b>`,
       section(market),
       "",
-      `🏬 <b>${esc(groceryLabel)}</b>`,
+      // Everything that isn't market produce goes in one bucket, labeled with
+      // every remaining store so a third one isn't silently dropped.
+      `🏬 <b>${esc(rest.join(" · "))}</b>`,
       section(grocery),
     );
   }
