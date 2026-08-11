@@ -31,5 +31,13 @@ jobs:
           version: latest
       - name: Start Supabase (applies all migrations + seeds)
         run: supabase db start
+      # pgTAP is not enabled by default, and without it plan()/is()/finish()
+      # do not exist — every test file fails with "function plan(integer) does
+      # not exist". Enabled here rather than in a migration so a test framework
+      # is never installed into anyone's production database.
+      - name: Enable pgTAP
+        run: |
+          psql "postgresql://postgres:postgres@localhost:54322/postgres" \
+            -c 'create extension if not exists pgtap with schema extensions;'
       - name: Run pgTAP tests
         run: supabase test db

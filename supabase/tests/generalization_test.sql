@@ -3,7 +3,7 @@
 -- transaction. Validates the SQL that unit tests can't reach.
 
 begin;
-select plan(4);
+select plan(8);
 
 -- ---------------------------------------------------------------------------
 -- Fixtures: one shared recipe (base_servings = 4) whose only bought ingredient
@@ -80,6 +80,43 @@ select is(
   3::numeric,
   'toddler counts toward servings, baby under 1 does not (qty 3)'
 );
+
+-- ---------------------------------------------------------------------------
+-- 5-8. The generalization guarantee itself: a household created NOW inherits
+--    nothing from the author's kitchen. Every fixture above sets free_staples
+--    explicitly, so the column DEFAULT was never actually exercised — and the
+--    data step in 20260728000000 used to be an unconditional UPDATE with no
+--    WHERE, which would have re-pinned every row to eggs + a farmers market.
+insert into households (id, name) values ('cccccccc-0000-0000-0000-00000000000d', 'Fresh');
+insert into household_preferences (household_id, adults)
+values ('cccccccc-0000-0000-0000-00000000000d', 2);
+
+select is(
+  (select free_staples from household_preferences
+    where household_id = 'cccccccc-0000-0000-0000-00000000000d'),
+  '{}'::text[],
+  'a fresh household inherits NO free staples (no egg/coop assumption)');
+
+select is(
+  (select shopping_sources from household_preferences
+    where household_id = 'cccccccc-0000-0000-0000-00000000000d'),
+  '{Grocery}'::text[],
+  'a fresh household gets a single plain Grocery bucket');
+
+select is(
+  (select timezone from households
+    where id = 'cccccccc-0000-0000-0000-00000000000d'),
+  'UTC',
+  'a fresh household defaults to UTC, not one region''s clock');
+
+-- The pin is gated on created_at predating the generalization, so a household
+-- created now must not have been touched by it even though it ran.
+select is(
+  (select count(*)::int from household_preferences
+    where household_id = 'cccccccc-0000-0000-0000-00000000000d'
+      and 'eggs' = any(free_staples)),
+  0,
+  'the live-instance pin cannot reach a newly created household');
 
 select * from finish();
 rollback;
