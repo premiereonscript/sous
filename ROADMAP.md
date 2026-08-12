@@ -124,10 +124,9 @@ because each is a failure mode worth re-checking against future changes:
   on the avoid list. A diet with no allergen behind it (vegetarian, halal,
   no_pork) and an ingredient the catalog has never seen both fall through to
   prompt enforcement. The planning pool itself is fully filtered.
-- **Thin vegan rotation.** The catalog carries 6 vegan mains against a 28-day
-  reuse window, so a strictly vegan household gets one full week and then a
-  shrinking one. More plant-based mains is the highest-value catalog
-  contribution.
+- **Weekly plan day/hour is SQL-only.** `plan_day` and `plan_hour` are the last
+  preferences with no conversational path. Everything else, timezone included,
+  can be changed by texting the bot. Listed as a good first contribution.
 - **One household per deploy.** A deliberate v1 boundary, not a gap — see the
   *Generalization note* at the top of SPEC.md. The multi-chat fan-out half of
   T15 did ship; multi-household-per-deploy did not.

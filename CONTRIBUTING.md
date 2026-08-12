@@ -55,10 +55,17 @@ Two specifics that are easy to get wrong:
 
 These are real gaps, roughly easiest first:
 
-- **More plant-based mains.** The catalog has 6 vegan mains against a 28-day
-  reuse window, so a vegan household runs dry after one week. Follow the pattern
-  in `20260728000400_seed_plant_based_mains.sql`, and tag both the recipe and
-  every new ingredient.
+- **Let the weekly plan time be set by chat.** `plan_day` and `plan_hour` are
+  the last preferences with no conversational path — everything else, including
+  timezone, can be changed by texting the bot, but these two still need SQL.
+  Adding them to the `update_preferences` tool in `_shared/orchestrate.ts`
+  (validate against `DAY_KEYS` and 0–23, the way `weeknight_days` already is)
+  would make *"send me the plan Saturday afternoon"* work. Small, self-contained,
+  and a good way to see how a preference travels from chat to the planner.
+- **More plant-based mains.** Follow the pattern in
+  `20260812000000_seed_catalog_expansion.sql`, and tag both the recipe and every
+  new ingredient — untagged recipes are invisible to restricted households by
+  design.
 - **Case-insensitive `free_staples` matching.** `generate_shopping_list`
   compares `i.name_canonical = any(v_free)` exactly, so "Eggs" silently does
   nothing. Lowercase both sides on read and write.

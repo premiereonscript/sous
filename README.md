@@ -141,7 +141,7 @@ ROADMAP.md                   what shipped, what the review caught, what's open
 setup.sh                     guided one-command setup
 supabase/
   config.toml                Edge Function config (verify_jwt per function)
-  migrations/                schema + planner SQL + recipe catalog (58 recipes)
+  migrations/                schema + planner SQL + recipe catalog (158 recipes)
   tests/                     pgTAP database tests (run via `supabase test db`)
   functions/
     tg_webhook/              Telegram webhook (auth, persist, route)
@@ -192,9 +192,9 @@ files. Onboarding asks the essentials; after that, tell Sous things like:
 
 Deeper changes live in the repo:
 
-- **Recipes** — the catalog is **58 dishes**: 50 in
-  `supabase/migrations/*_seed_recipes*.sql` and 8 plant-based mains in
-  `20260728000400_seed_plant_based_mains.sql`. Add your own
+- **Recipes** — the catalog is **158 dishes** across 14 cuisines, seeded by the
+  `*_seed_recipes*.sql` migrations plus
+  `20260812000000_seed_catalog_expansion.sql`. Add your own
   by following the same pattern — an `ingredients` row per new item, a `recipes`
   row (with `base_servings` + `dietary_tags`), and its `recipe_ingredients` —
   then `supabase db push`. Sous also creates recipe **variants** on the fly when
@@ -213,11 +213,9 @@ Deeper changes live in the repo:
 - **Single household per deploy.** By design — one deploy serves one household
   (its members can each DM the bot and share a group chat; the weekly plan fans
   out to all of them). To run it for another family, deploy another instance.
-- **The vegan rotation is thin.** The starter catalog carries 6 vegan mains
-  against a 28-day reuse window, so a strictly vegan household gets one full
-  week and then a shrinking one until the window clears. Add your own mains (see
-  above), or contribute some back — it's the highest-value catalog contribution
-  going.
+- **Cuisine coverage is uneven.** The catalog leans toward the cuisines it was
+  seeded with. Every cuisine is a plain text tag, so widening it is just adding
+  recipes — no schema change, no code change.
 - **English-first (v1).** Replies and generated content follow the household's
   language, and money/dates are localized — but the fixed UI strings (e.g. the
   "Shopping list" header) and the starter recipe catalog are English. Full
