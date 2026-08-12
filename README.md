@@ -13,6 +13,24 @@ Telegram bot on top of Supabase. Total running cost is ~$5–7/month.
 > Built around [`SPEC.md`](./SPEC.md) — read that for the full product thinking,
 > data model, and threat model.
 
+> ### ⚠️ Allergies: read this before you rely on it
+>
+> Sous filters recipes against the diets and allergies you give it, in SQL, and
+> it refuses anything it can't positively classify. That makes it a **useful
+> convenience, not a safety device.** It reasons over a recipe catalog, not over
+> the actual food in your kitchen — it cannot see brands, substitutions,
+> cross-contamination, or what a manufacturer changed last month.
+>
+> **Always read the actual labels.** If someone in your household has a severe
+> or anaphylactic allergy, do not let this tool be the thing standing between
+> them and a reaction.
+>
+> Two limits worth knowing concretely: when you customize a dish in chat, the
+> guard blocks ingredients carrying a known allergen but cannot vouch for one
+> the catalog has never seen; and diets with no allergen behind them
+> (vegetarian, halal, no-pork) are enforced on the planning pool but not on that
+> customize path. Both are tracked in [`ROADMAP.md`](./ROADMAP.md).
+
 ---
 
 ## What it does

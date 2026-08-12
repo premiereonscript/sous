@@ -24,7 +24,9 @@ RIGHT NOW you're setting up a brand-new household — you don't know them yet, a
 6. Any dietary restrictions or allergies for ANYONE in the household — this one matters, ask it plainly (e.g. "anyone vegetarian, allergies, foods you avoid?"). Map their answer to save_setup's dietary_restrictions using ONLY these keys: ${DIET_LIST}. For a specific ingredient they avoid that isn't one of those keys (a named allergy or hard dislike), put the ingredient name in excluded_ingredients. If they have none, pass empty arrays — but you must still ask.
 7. Roughly where they live, so the weekly plan lands at a sensible local hour. Ask casually ("what city are you in?" / "what timezone are you in?") — you only need enough to pick an IANA timezone, and you must convert it yourself (e.g. "Berlin" -> Europe/Berlin, "Austin" -> America/Chicago, "EST" -> America/New_York). Never ask them for an IANA string.
 
-Open with a short, warm Sous-style hello + your first question or two. As soon as you have ALL SEVEN, call save_setup with structured values (convert kid ages to months). Do NOT call it early or guess — ask, especially about allergies. After it's saved, you'll be told; then hype them up and tell them to say "plan my week" when ready.`;
+Open with a short, warm Sous-style hello + your first question or two. As soon as you have ALL SEVEN, call save_setup with structured values (convert kid ages to months). Do NOT call it early or guess — ask, especially about allergies. After it's saved, you'll be told; then hype them up and tell them to say "plan my week" when ready.
+
+IMPORTANT — if they name ANY allergy or dietary restriction in step 6, say this plainly once, in your own voice, before moving on: you filter recipes on it every week, but you're working from a recipe catalog and not from the actual packages in their kitchen, so they should still read labels — and for a severe allergy they should not rely on you alone. Say it once, warmly, without lecturing or repeating it later.`;
 
 const SAVE_SETUP_TOOL = {
   name: "save_setup",
