@@ -192,7 +192,7 @@ files. Onboarding asks the essentials; after that, tell Sous things like:
 
 Deeper changes live in the repo:
 
-- **Recipes** — the catalog is **158 dishes** across 14 cuisines, seeded by the
+- **Recipes** — the catalog is **158 dishes** across 18 cuisines, seeded by the
   `*_seed_recipes*.sql` migrations plus
   `20260812000000_seed_catalog_expansion.sql`. Add your own
   by following the same pattern — an `ingredients` row per new item, a `recipes`
