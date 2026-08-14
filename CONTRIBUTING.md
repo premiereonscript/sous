@@ -77,6 +77,35 @@ These are real gaps, roughly easiest first:
   the customize path, but not a diet with no allergen behind it (vegetarian,
   halal, no-pork), and not an ingredient the catalog has never seen.
 
+## Never edit a migration that has shipped
+
+This is the rule most likely to bite you, because the failure is silent.
+
+Every deployed instance records which migrations it has run. Once a migration is
+on `main`, someone's database has already applied it and **will never apply it
+again** — so editing that file changes nothing for them. It only affects people
+installing from scratch, which quietly splits the catalog into two versions.
+
+The seeds make this sharper. They are guarded (`where not exists (... r.title =
+v.title)` for recipes, `on conflict (name_canonical) do nothing` for
+ingredients), which is what makes them safe to re-run — and also what makes
+editing them useless on an existing install. Correcting a recipe means writing a
+new migration with an explicit `update`, not fixing the row in the seed:
+
+```sql
+-- a NEW timestamped migration, not an edit to the seed
+update recipes
+   set dietary_tags = array_append(dietary_tags, 'contains_egg')
+ where title = 'Vegetable Lo Mein' and not ('contains_egg' = any(dietary_tags));
+```
+
+This has already happened once. Two seeded recipes contained a line asserting
+the original author kept backyard chickens. Deleting it from the seed fixed new
+installs and did nothing for existing ones, so the change needed a data step in
+a new migration to actually reach anybody. Assume the same for any correction.
+
+Adding new rows is different and needs no ceremony — just add a new migration.
+
 ## Adding recipes
 
 An `ingredients` row per new item (with `allergens`), a `recipes` row (with

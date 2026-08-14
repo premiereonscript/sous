@@ -257,6 +257,41 @@ supabase test db
 
 CI runs all of it on every PR.
 
+## Staying up to date
+
+Your instance is yours — nothing auto-updates, and nobody can push anything to
+it. When you want new recipes or fixes:
+
+```bash
+git pull
+supabase db push                                          # only new migrations run
+supabase functions deploy tg_webhook   --no-verify-jwt --use-api
+supabase functions deploy orchestrator                 --use-api
+supabase functions deploy kickoff_week --no-verify-jwt --use-api
+supabase functions deploy send_list    --no-verify-jwt --use-api
+```
+
+Both steps are needed. `db push` updates the schema and recipes; the deploys
+update the bot's behavior. Skipping the deploys leaves you on old code with a
+new database, which looks like the update silently failed.
+
+**Your data survives.** Migrations are additive, and every recipe seed is
+guarded on title, so your preferences, ratings, exclusions, plan history and any
+recipes you added yourself are left alone. Deploying is safe mid-week; an
+in-progress plan keeps working.
+
+If you forked rather than cloned, point at upstream once:
+
+```bash
+git remote add upstream https://github.com/premiereonscript/sous.git
+git pull upstream main
+```
+
+**Check the account first if a deploy 403s.** `db push` authenticates against the
+database, but `functions deploy` authenticates against your Supabase *account* —
+so if you're logged into a different one, the schema updates and the code
+doesn't. `supabase projects list` should show the project you're deploying to.
+
 ## Contributing
 
 See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for running the stack locally and a
