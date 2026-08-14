@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./assets/sous-logo.jpg" alt="Sous — a robot in a chef's hat holding a whisk" width="380">
+</p>
+
 # Sous 🥄
 
 A personal **Telegram meal-planning bot** that replaces a meal-kit
@@ -139,6 +143,7 @@ SETUP.md                     step-by-step setup (human- and agent-followable)
 CONTRIBUTING.md              running it locally, good first issues, the one rule
 ROADMAP.md                   what shipped, what the review caught, what's open
 setup.sh                     guided one-command setup
+assets/                      logo
 supabase/
   config.toml                Edge Function config (verify_jwt per function)
   migrations/                schema + planner SQL + recipe catalog (158 recipes)
