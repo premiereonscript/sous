@@ -658,13 +658,21 @@ ingredient list — the variant is a preparation fork, not a separate recipe.
 | Item | Cost |
 |---|---|
 | Supabase free tier | $0 |
-| Anthropic API (~$1.00/Fri session + ~$0.20/wk Haiku + occasional Opus) — slightly lower at 5 dinners vs. 10 meals | $5–7 |
+| Anthropic API (weekly planning session + Haiku intent per message + Sonnet chat turns) | ~$0.05 |
 | Telegram Bot API | $0 |
 | Domain / TLS | $0 |
-| **Total** | **~$5–7/mo** |
+| **Total** | **under $1/mo** |
 
-If it ever crosses **$15/mo**, something is wrong — check token bloat
-(full conversation history in prompts) before scaling anything.
+Measured, not projected: the reference instance billed **$0.12 total between
+2026-05-21 and 2026-08-09** — about five cents a month for a household using it
+weekly. An earlier version of this table guessed `$5–7/mo` by assuming ~$1.00
+per Friday planning session; the real figure is roughly 20× lower, because the
+planner sends 40 candidate recipes and a preferences block, not a large corpus,
+and a household sends a handful of chat messages a week rather than dozens a day.
+
+Chat volume, not planning, is the variable that scales. If it ever crosses
+**$5/mo**, something is wrong — check token bloat (full conversation history in
+prompts) before scaling anything.
 
 ---
 

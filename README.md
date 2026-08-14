@@ -12,7 +12,8 @@ for however you actually shop.
 
 It is deliberately **not** a SaaS. There's no sign-up page. You deploy your
 **own** private instance for **your** household — it's a prompt, a cron, and a
-Telegram bot on top of Supabase. Total running cost is ~$5–7/month.
+Telegram bot on top of Supabase. Total running cost is under $1/month — Supabase's
+free tier plus a few cents of Anthropic API usage.
 
 > Built around [`SPEC.md`](./SPEC.md) — read that for the full product thinking,
 > data model, and threat model.
@@ -102,7 +103,7 @@ You'll create three accounts (two free, one metered) and install one CLI:
 |---|---|---|
 | Supabase account + project | [supabase.com](https://supabase.com) | free tier |
 | Telegram bot token | [@BotFather](https://t.me/BotFather) → `/newbot` | free |
-| Anthropic API key | [console.anthropic.com](https://console.anthropic.com) | ~$5–7/mo usage |
+| Anthropic API key | [console.anthropic.com](https://console.anthropic.com) | pennies/mo usage |
 | Supabase CLI | `brew install supabase/tap/supabase` | — |
 
 ## Set it up
@@ -237,7 +238,9 @@ Deeper changes live in the repo:
   good contribution.
 - **Kid-safety is prompt-enforced.** The code-side `unsafe_for_age` block-list
   from the spec (§10.7) isn't built yet — a good first contribution.
-- Costs are tiny but **real** — the Anthropic key bills per use. Set a spend cap.
+- Costs are tiny but **real** — the Anthropic key bills per use. The reference
+  instance ran $0.12 across two and a half months of daily household use, but
+  your usage is your own: set a spend cap in the console.
 
 ## Tests
 
